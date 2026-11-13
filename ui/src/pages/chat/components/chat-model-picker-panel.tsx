@@ -509,7 +509,15 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
       class="chat-controls__inline-select-menu chat-controls__model-menu"
       aria-label={t("chat.selectors.model")}
       data-chat-model-filtering={searchView?.filtering() ? "" : undefined}
-      data-chat-model-compact={modelSelectionLocked() || !state().hasOptions ? "" : undefined}
+      data-chat-model-compact={
+        modelSelectionLocked() ||
+        (!state().hasOptions &&
+          panel.params.modelCatalogState?.status === "ready" &&
+          !isModelCatalogLoading(panel.params.modelCatalogState) &&
+          panel.params.modelCatalogState.modelSelectionPolicy?.restricted)
+          ? ""
+          : undefined
+      }
     >
       {modelSelectionLocked() ? (
         <div class="chat-controls__locked-model" aria-label={t("chat.selectors.modelLockedLabel")}>

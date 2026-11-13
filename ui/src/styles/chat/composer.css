@@ -4117,6 +4117,8 @@ html[dir="rtl"] .chat-attachments-preview .chat-attachment-loading__line > span 
 }
 
 .chat-controls__model-menu[data-chat-model-compact] {
+  height: auto;
+  flex: 0 1 auto;
   min-height: 0;
   padding: 8px;
 }
@@ -5042,6 +5044,13 @@ html[dir="rtl"] .chat-attachments-preview .chat-attachment-loading__line > span 
     padding: 6px 8px 20px;
     gap: 8px;
     border-radius: inherit;
+  }
+
+  .agent-chat__input
+    .chat-controls__model-picker
+    > .chat-picker-overlay:has(> [data-chat-model-compact]),
+  .agent-chat__input .chat-controls__model-menu[data-chat-model-compact] {
+    height: auto;
   }
 
   .chat-controls__model-menu::before {

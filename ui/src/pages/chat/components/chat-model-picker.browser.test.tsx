@@ -517,6 +517,53 @@ it("keeps the desktop panel fixed above its model chip across provider and searc
   }
 });
 
+it.each([
+  [1440, 900, 350],
+  [390, 844, 448],
+])(
+  "sizes only locked and restricted-empty panels to content at %ipx",
+  async (width, height, fixedHeight) => {
+    await page.viewport(width, height);
+    const { params, update, open, picker } = mountPicker(false);
+    params.modelCatalogState = {
+      hasSnapshot: false,
+      status: "loading",
+      modelSelectionPolicy: { restricted: true, defaultModel: null },
+    };
+    update();
+    try {
+      await open();
+      const menu = picker.querySelector<HTMLElement>(".chat-controls__model-menu")!;
+      const surface = picker.querySelector<HTMLElement>(".chat-picker-overlay")!;
+      await vi.waitFor(() => expect(surface.getBoundingClientRect().height).toBe(fixedHeight));
+
+      params.modelCatalogState = {
+        ...params.modelCatalogState,
+        hasSnapshot: true,
+        status: "ready",
+      };
+      update();
+      await vi.waitFor(() => {
+        expect(menu.textContent).toContain("No models are permitted by your admin.");
+        expect(surface.getBoundingClientRect().height).toBeGreaterThan(0);
+        expect(surface.getBoundingClientRect().height).toBeLessThan(200);
+        expect(menu.getBoundingClientRect().height).toBe(surface.getBoundingClientRect().height);
+      });
+
+      params.modelSelectionLocked = true;
+      update();
+      await vi.waitFor(() => {
+        expect(picker.querySelector(".chat-controls__locked-model")).not.toBeNull();
+        expect(surface.getBoundingClientRect().height).toBeGreaterThan(0);
+        expect(surface.getBoundingClientRect().height).toBeLessThan(200);
+        expect(menu.getBoundingClientRect().height).toBe(surface.getBoundingClientRect().height);
+      });
+    } finally {
+      await page.viewport(1280, 720);
+    }
+  },
+);
+
 it("places provider recovery below the disabled model rows", async () => {
   const { params, update, open, picker } = mountPicker();
   params.modelOptions = params.modelOptions.map((entry) => ({
