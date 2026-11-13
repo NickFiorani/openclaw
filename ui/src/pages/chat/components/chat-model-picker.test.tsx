@@ -140,6 +140,7 @@ it.each([false, true])(
       modelOptions: [
         option("fixture", "lead", { recommended: true }),
         option("fixture", "rest", { disabled: restDisabled }),
+        option("other", "model"),
       ],
       selectedModelValue: "fixture/lead",
       triggerModelLabel: "lead",
@@ -160,7 +161,7 @@ it.each([false, true])(
     // Keyboard focus lands on the first selectable revealed model, else back on search.
     expect(document.activeElement).toBe(restDisabled ? control(container, "search") : rest());
 
-    group.click();
+    control(container, "provider-toggle", "other")!.click();
     flush();
     group.click();
     flush();
@@ -195,8 +196,8 @@ it("keeps Anthropic runtime choices under one provider tab", async () => {
     container.querySelector(
       '[data-chat-model-provider-group="anthropic"] .chat-controls__auth-meta-label',
     )?.textContent,
-  ).toBe("Claude Max");
-  control(container, "provider-toggle", "anthropic")!.click();
+  ).toBe("Claude Max · you@example.com");
+  expect(container.querySelectorAll("[data-chat-model-provider-toggle]")).toHaveLength(0);
   flush();
   expect(provider("anthropic/claude-sonnet-5-5")).toBe("anthropic");
 });

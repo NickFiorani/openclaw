@@ -1,11 +1,14 @@
 import { createMemo, Show, useContext } from "solid-js";
-import { providerDisplayLabel } from "../../../components/provider-icon-data.ts";
+import { providerDisplayLabel as defaultProviderLabel } from "../../../components/provider-icon-data.ts";
+import type { ProviderPresentation } from "../../../components/provider-icon-data.ts";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { ProviderBrandIcon } from "../../../components/solid/provider-icon.tsx";
+import { Tooltip } from "../../../components/solid/tooltip.tsx";
 import { formatModelRuntimeLabel } from "../../../lib/model-runtime-label.ts";
-import { t } from "../../../lib/reactive/i18n.ts";
 import "../../../components/tooltip.ts";
+import { t } from "../../../lib/reactive/i18n.ts";
 import { keyboardHintsVisible } from "../../../lib/reactive/keyboard-hints.ts";
+import { ChatContextWindowControl } from "./chat-context-window-control.tsx";
 import {
   formatModelContextMeta,
   formatModelLabel,
@@ -31,8 +34,17 @@ function ModelShortcut(props: { rowKey: string }) {
   );
 }
 
-export function ChatModelProviderIcon(props: { provider: string }) {
-  return <ProviderBrandIcon provider={props.provider} class="chat-controls__provider-icon" />;
+export function ChatModelProviderIcon(props: {
+  provider: string;
+  presentation?: ProviderPresentation;
+}) {
+  return (
+    <ProviderBrandIcon
+      provider={props.provider}
+      presentation={props.presentation}
+      class="chat-controls__provider-icon"
+    />
+  );
 }
 
 export function ChatModelTargetIcon() {
@@ -71,7 +83,12 @@ function optionPresentation(options: ModelPresentationProps) {
   // Resetting a recorded pin remains possible even when its default model is unavailable.
   const resetsPin = options.entry.isDefault && options.sessionModelPinned;
   const needsAuth = optionNeedsAuth(options.entry);
-  const modelMeta = needsAuth ? "" : formatModelContextMeta(options.entry, t);
+  const context =
+    selected && (options.contextWindow?.options.length ?? 0) > 1
+      ? options.contextWindow
+      : undefined;
+  const contextOption = context?.options.find((option) => option.id === context.selected);
+  const modelMeta = needsAuth ? "" : (contextOption?.label ?? formatModelContextMeta(options.entry, t));
   const accessibleStatus = needsAuth
     ? t("modelSetup.candidates.signInNeeded")
     : options.entry.unavailableReason === "unsupported-runtime"
@@ -79,6 +96,7 @@ function optionPresentation(options: ModelPresentationProps) {
       : "";
   return {
     selected,
+    context: contextOption ? context : undefined,
     modelLabel,
     runtimeLabel,
     chatOnlyHelp,
@@ -109,10 +127,17 @@ export function modelOptionSearchRow(
   return {
     key: modelPickerOptionKey(options.entry),
     name: formatModelLabel(options.entry).toLocaleLowerCase(),
-    keywords: [options.entry.isDefault ? defaultLabel : "", runtimeLabel]
+    keywords: [
+      options.entry.isDefault ? defaultLabel : "",
+      runtimeLabel,
+      options.entry.agentRuntimeId,
+    ]
       .join(" ")
       .toLocaleLowerCase(),
-    providerLabel: providerDisplayLabel(options.entry.provider).toLocaleLowerCase(),
+    providerLabel: defaultProviderLabel(
+      options.entry.provider,
+      options.entry.presentation,
+    ).toLocaleLowerCase(),
     reference: options.entry.value,
     selected,
     hasShortcut: !selected,
@@ -128,6 +153,8 @@ type OptionPresentation = ReturnType<ReturnType<typeof createOptionPresentation>
 function ModelOptionButton(
   props: ChatModelPickerOptionProps & { presentation: OptionPresentation },
 ) {
+  const providerDisplayLabel = (provider: string) =>
+    defaultProviderLabel(provider, props.entry.presentation);
   const search = useContext(ChatModelSearchContext);
   const defaultLabel = createMemo(() =>
     props.entry.isDefault ? t("chat.modelControls.default") : "",
@@ -156,7 +183,11 @@ function ModelOptionButton(
       data-chat-model-runtime={props.entry.agentRuntime ?? undefined}
       data-chat-model-default={props.entry.isDefault ? "true" : undefined}
       data-chat-model-index={props.index}
-      data-chat-model-keywords={[defaultLabel(), props.presentation.runtimeLabel]
+      data-chat-model-keywords={[
+        defaultLabel(),
+        props.presentation.runtimeLabel,
+        props.entry.agentRuntimeId,
+      ]
         .filter(Boolean)
         .join(" ")
         .toLocaleLowerCase()}
@@ -189,7 +220,10 @@ function ModelOptionButton(
       }}
     >
       <span class="chat-controls__model-option-provider">
-        <ChatModelProviderIcon provider={props.entry.provider} />
+        <ChatModelProviderIcon
+          provider={props.entry.provider}
+          presentation={props.entry.presentation}
+        />
       </span>
       <span class="chat-controls__model-option-copy">
         <span class="chat-controls__model-option-title">
@@ -205,7 +239,17 @@ function ModelOptionButton(
             </span>
           </Show>
           <Show when={props.presentation.modelMeta}>
-            <span class="chat-controls__model-option-meta">{props.presentation.modelMeta}</span>
+            <span
+              class={[
+                "chat-controls__model-option-meta",
+                { "chat-controls__context-placeholder": Boolean(props.presentation.context) },
+              ]}
+            >
+              {props.presentation.modelMeta}
+              <Show when={props.presentation.context}>
+                <Icon name="chevronDown" />
+              </Show>
+            </span>
           </Show>
         </span>
       </span>
@@ -225,14 +269,26 @@ function ModelOptionButton(
 export function ChatModelPickerOption(props: ChatModelPickerOptionProps) {
   const presentation = createOptionPresentation(props);
   return (
-    <Show
-      when={presentation().detail}
-      fallback={<ModelOptionButton {...props} presentation={presentation()} />}
+    <div
+      class={[
+        "chat-controls__model-option-wrap",
+        { "chat-controls__model-option-wrap--context": Boolean(presentation().context) },
+      ]}
     >
-      <openclaw-tooltip prop:content={presentation().detail}>
+      <Tooltip
+        class="chat-controls__model-tooltip"
+        content={[presentation().modelLabel, presentation().detail].filter(Boolean).join(". ")}
+        delay={800}
+        describe={Boolean(presentation().detail)}
+      >
         <ModelOptionButton {...props} presentation={presentation()} />
-      </openclaw-tooltip>
-    </Show>
+      </Tooltip>
+      <Show when={presentation().context}>
+        {(context) => (
+          <ChatContextWindowControl contextWindow={context()} sessionKey={props.sessionKey!} />
+        )}
+      </Show>
+    </div>
   );
 }
 

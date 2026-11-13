@@ -249,7 +249,7 @@ describe("chat model runtime choices", () => {
         container.querySelectorAll(".chat-controls__model-option-name"),
         (row) => row.textContent,
       ),
-    ).toEqual(["GPT-5.6 Sol"]);
+    ).toEqual(["GPT-5.6 Sol codex"]);
     expect(triggerLabel(container)).toBe("GPT-5.6 Sol codex");
   });
 
@@ -313,4 +313,40 @@ describe("chat model runtime choices", () => {
       expect(onSetup).toHaveBeenCalledTimes(guard === "missing-auth" ? 1 : 0);
     },
   );
+});
+
+it("carries provider presentation from the admitted catalog into trigger and picker rows", async () => {
+  const entry: ModelCatalogEntry = {
+    provider: "workstation",
+    id: "local",
+    name: "Local model",
+    available: true,
+    providerName: "Research Lab",
+  };
+  const result = createSessionsListResult({
+    model: entry.id,
+    modelProvider: entry.provider,
+    defaultsModel: entry.id,
+    defaultsProvider: entry.provider,
+  });
+  const onModelSelect = vi.fn(async () => {});
+  const container = await renderControls(result, [entry], { onModelSelect });
+  const group = () => container.querySelector('[data-chat-model-provider-group="workstation"]');
+  expect(container.querySelector(".chat-controls__trigger-provider-icon")?.textContent).toBe("R");
+  expect(group()?.querySelector(".chat-controls__provider-label")?.textContent).toBe(
+    "Research Lab",
+  );
+  expect(group()?.querySelector(".chat-controls__provider-icon")?.textContent).toBe("R");
+  await renderControls(
+    result,
+    [{ ...entry, providerName: "Alpha workstation" }],
+    { onModelSelect },
+    container,
+  );
+  expect(container.querySelector(".chat-controls__trigger-provider-icon")?.textContent).toBe("A");
+  expect(group()?.querySelector(".chat-controls__provider-label")?.textContent).toBe(
+    "Alpha workstation",
+  );
+  expect(container.querySelector('[data-chat-model-option="workstation/local"]')).not.toBeNull();
+  expect(onModelSelect).not.toHaveBeenCalled();
 });
