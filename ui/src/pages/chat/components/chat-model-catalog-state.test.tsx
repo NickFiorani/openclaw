@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 import { expect, it, onTestFinished, vi } from "vitest";
 import type { ChatModelCatalogState as ModelCatalogState } from "../../../lib/model-catalog-store.ts";
+import { installModelPickerLayout } from "../../../test-helpers/model-picker-layout.ts";
 import { mountSolid } from "../../../test-helpers/mount-solid.ts";
 import { flush } from "../../../test-helpers/solid-settle.ts";
 import { ChatModelCatalogRefresh, ChatModelCatalogState } from "./chat-model-catalog-state.tsx";
@@ -169,3 +170,26 @@ it.each([
     expect(container.querySelector<HTMLElement>(modelControlSelector("setup"))).not.toBeNull();
   },
 );
+
+it("keeps search available while announcing the initial catalog skeleton, then shows results", async () => {
+  installModelPickerLayout();
+  const params = modelPickerProps({
+    open: true,
+    modelCatalogState: { hasSnapshot: false, status: "loading" },
+  });
+  const view = mountModelPicker(params);
+  await waitForModelMenu(view.container);
+  const search = view.container.querySelector<HTMLInputElement>("[data-chat-model-search]")!;
+  expect(search.disabled).toBe(false);
+  const status = view.container.querySelector('[data-chat-model-catalog-state="loading"]')!;
+  expect(status.getAttribute("aria-label")).toBe("Loading models…");
+  expect(status.textContent).toBe("");
+  view.update({
+    ...params,
+    modelOptions: [modelOption("example", "model")],
+    modelCatalogState: { hasSnapshot: true, status: "ready" },
+  });
+  expect(view.container.querySelector("[data-chat-model-search]")).toBe(search);
+  expect(view.container.querySelector('[data-chat-model-catalog-state="loading"]')).toBeNull();
+  expect(view.container.querySelector('[data-chat-model-option="example/model"]')).not.toBeNull();
+});

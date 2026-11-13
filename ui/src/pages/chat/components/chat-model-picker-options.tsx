@@ -80,7 +80,7 @@ function optionPresentation(options: ModelPresentationProps) {
   const chatOnlyHelp =
     options.entry.supportsTools === false ? t("chat.modelControls.chatOnlyHelp") : "";
   const detail = [routeDetail, chatOnlyHelp].filter(Boolean).join(" ");
-  // Resetting a recorded pin remains possible even when its default model is unavailable.
+  // Auth-blocked rows stay inert; other unavailable defaults can reset a recorded pin.
   const resetsPin = options.entry.isDefault && options.sessionModelPinned;
   const needsAuth = optionNeedsAuth(options.entry);
   const context =
@@ -88,7 +88,9 @@ function optionPresentation(options: ModelPresentationProps) {
       ? options.contextWindow
       : undefined;
   const contextOption = context?.options.find((option) => option.id === context.selected);
-  const modelMeta = needsAuth ? "" : (contextOption?.label ?? formatModelContextMeta(options.entry, t));
+  const modelMeta = needsAuth
+    ? ""
+    : (contextOption?.label ?? formatModelContextMeta(options.entry, t));
   const accessibleStatus = needsAuth
     ? t("modelSetup.candidates.signInNeeded")
     : options.entry.unavailableReason === "unsupported-runtime"

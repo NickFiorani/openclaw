@@ -10,7 +10,11 @@ import {
   ChatModelAccountSectionView,
 } from "./chat-model-account-control.tsx";
 import { ChatModelAuthState, modelAuthState } from "./chat-model-auth-state.tsx";
-import { ChatModelCatalogRefresh, ChatModelCatalogState } from "./chat-model-catalog-state.tsx";
+import {
+  ChatModelCatalogRefresh,
+  ChatModelCatalogState,
+  isModelCatalogLoading,
+} from "./chat-model-catalog-state.tsx";
 import {
   isModelPickerOptionSelected,
   modelProviderId,
@@ -104,6 +108,11 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
       selectedModelValue: selectedModelValue(),
       selectedAgentRuntime: selectedAgentRuntime(),
     }),
+  );
+  const showBrowser = createMemo(
+    () =>
+      state().hasOptions ||
+      (panel.params.accountSection && !isModelCatalogLoading(panel.params.modelCatalogState)),
   );
   const accounts = createMemo(() =>
     panel.params.accountSection?.viewProps(
@@ -303,16 +312,17 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
   );
   function CatalogStatus() {
     return (
-      <>
+      <Show when={!activeAuth() || panel.params.modelCatalogState?.status !== "ready"}>
         {renderCatalogStatus()(() => (
           <ChatModelCatalogState
+            loadingSkeleton
             state={panel.params.modelCatalogState}
             hasOptions={modelOptions().length > 0}
             hasSelectableOptions={state().hasSelectableModelOptions}
             onModelSetup={onModelSetup()}
           />
         ))}
-      </>
+      </Show>
     );
   }
   function TargetOptions(props: { group: ChatModelPickerTargetGroup }) {
@@ -407,14 +417,11 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
     const showAuth = createMemo(
       () =>
         Boolean(auth()) &&
-        !(
-          auth()?.kind === "missing" &&
-          options().some(
-            (option) =>
-              option.disabled &&
-              (option.unavailableReason === "missing-auth" ||
-                option.unavailableReason === "auth-failed"),
-          )
+        !options().some(
+          (option) =>
+            option.disabled &&
+            (option.unavailableReason === "missing-auth" ||
+              option.unavailableReason === "auth-failed"),
         ),
     );
     const authLabel = () =>
@@ -428,7 +435,9 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
         {renderRow(`heading:${provider()}`, () => (
           <div class="chat-controls__provider-heading" data-chat-model-provider={props.provider}>
             <span class="chat-controls__provider-label">{providerLabel()}</span>
-            {props.provider === state().activeProvider && accounts() ? (
+            {props.provider === state().activeProvider &&
+            !modelAuthState(options()) &&
+            accounts() ? (
               <ChatModelAccountSectionView {...accounts()!} />
             ) : showAuth() ? (
               <span class="chat-controls__auth-meta" data-auth-kind={authKind()}>
@@ -509,7 +518,7 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
         </div>
       ) : (
         <>
-          {state().hasOptions ? (
+          {showBrowser() || isModelCatalogLoading(panel.params.modelCatalogState) ? (
             <div class="chat-controls__model-search-wrap">
               <Icon name="search" />
               <input
@@ -544,8 +553,8 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
               ) : undefined}
             </div>
           ) : undefined}
-          {!state().hasOptions ? <CatalogStatus /> : undefined}
-          {state().hasOptions ? (
+          {!showBrowser() ? <CatalogStatus /> : undefined}
+          {showBrowser() ? (
             <>
               <div
                 class="chat-controls__model-browser"
@@ -623,6 +632,9 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
                       </For>
                     </div>
                   </div>
+                  <Show when={activeAuth()}>
+                    {(auth) => <ChatModelAuthState state={auth()} onSetup={onModelSetup()} />}
+                  </Show>
                   <Show when={!searchView?.filtering()}>
                     <ChatModelSettings
                       params={panel.params}
@@ -658,9 +670,6 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
                   >
                     {t("chat.modelControls.noMatchingModels")}
                   </div>
-                  <Show when={activeAuth()}>
-                    {(auth) => <ChatModelAuthState state={auth()} onSetup={onModelSetup()} />}
-                  </Show>
                   <CatalogStatus />
                 </div>
               </div>

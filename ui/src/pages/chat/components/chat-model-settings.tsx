@@ -1,6 +1,6 @@
 import { createMemo, createUniqueId, For, Show } from "solid-js";
 import { Icon } from "../../../components/solid/icon.tsx";
-import { Popover } from "../../../components/solid/popover.tsx";
+import { Popover, type PopoverHandle } from "../../../components/solid/popover.tsx";
 import { formatModelRuntimeLabel } from "../../../lib/model-runtime-label.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { modelProviderId, type ChatModelPickerOption } from "./chat-model-picker-options.ts";
@@ -29,6 +29,7 @@ export function ChatModelRuntimeControl(props: {
   onSelect: (runtime: string, option: ChatModelPickerOption | undefined) => void;
 }) {
   const infoId = createUniqueId();
+  let info: PopoverHandle | undefined;
   const runtimes = createMemo(() => [...new Set(props.options.map(modelRuntimeId))]);
   const option = (runtime: string) =>
     props.options.find(
@@ -59,6 +60,7 @@ export function ChatModelRuntimeControl(props: {
           }
         >
           <Popover
+            ref={(handle) => (info = handle)}
             id={infoId}
             label={t("chat.modelControls.runsOn")}
             triggerClass="chat-controls__runtime-info"
@@ -68,6 +70,17 @@ export function ChatModelRuntimeControl(props: {
             trigger={<Icon name="info" />}
           >
             <div class="chat-controls__runtime-details-content">
+              <div class="chat-controls__runtime-details-header">
+                <span>{t("chat.modelControls.runsOn")}</span>
+                <button
+                  class="chat-controls__runtime-details-close"
+                  type="button"
+                  aria-label={t("common.close")}
+                  onClick={() => info?.hide()}
+                >
+                  <Icon name="x" />
+                </button>
+              </div>
               <For each={runtimes()}>
                 {(runtime) => (
                   <div>
