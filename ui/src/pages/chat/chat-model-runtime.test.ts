@@ -249,7 +249,7 @@ describe("chat model runtime choices", () => {
         container.querySelectorAll(".chat-controls__model-option-name"),
         (row) => row.textContent,
       ),
-    ).toEqual(["GPT-5.6 Sol"]);
+    ).toEqual(["GPT-5.6 Sol codex"]);
     expect(triggerLabel(container)).toBe("GPT-5.6 Sol codex");
   });
 

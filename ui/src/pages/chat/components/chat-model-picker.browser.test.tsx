@@ -576,3 +576,32 @@ it.each(["cancel", "drop"])(
     );
   },
 );
+
+it("opens the selected row's context menu without selecting its model", async () => {
+  const { params, update, open, picker } = mountPicker();
+  const onContextSelect = vi.fn(async () => {});
+  params.contextWindow = {
+    options: [
+      { id: "272k", label: "272K", contextWindow: 272_000 },
+      { id: "1m", label: "1M", contextWindow: 1_000_000 },
+    ],
+    selected: "272k",
+    disabled: false,
+    onSelect: onContextSelect,
+  };
+  update();
+  await open();
+  await page.getByRole("button", { name: "Context window: 272K" }).click();
+  await expect.element(page.getByRole("menuitemradio", { name: "1M", exact: true })).toBeVisible();
+  expect(params.onModelSelect).not.toHaveBeenCalled();
+  await page.getByRole("menuitemradio", { name: "1M", exact: true }).click();
+  expect(onContextSelect).toHaveBeenCalledExactlyOnceWith("1m", "main");
+  expect(params.onModelSelect).not.toHaveBeenCalled();
+  expect(picker.open).toBe(true);
+  await page.getByRole("button", { name: "Context window: 272K" }).click();
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(page.getByRole("button", { name: "Context window: 272K" }))
+    .toHaveAttribute("aria-expanded", "false");
+  expect(picker.open).toBe(true);
+});
