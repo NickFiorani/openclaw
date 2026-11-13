@@ -1,5 +1,9 @@
 import { createMemo, createSignal, For } from "solid-js";
-import { providerDisplayLabel } from "../../../components/provider-icon-data.ts";
+import {
+  providerDisplayLabel,
+  type ProviderPresentation,
+} from "../../../components/provider-icon-data.ts";
+import { Tooltip } from "../../../components/solid/tooltip.tsx";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { createTabList } from "../../../lib/tabs.ts";
 import { ChatModelProviderIcon, ChatModelTargetIcon } from "./chat-model-picker-options.tsx";
@@ -7,6 +11,7 @@ import { loadModelProviderOrder, saveModelProviderOrder } from "./model-provider
 
 export function ChatModelProviderRail(props: {
   providers: string[];
+  presentation: (provider: string) => ProviderPresentation | undefined;
   targets: readonly { id: string; label: string }[];
   active?: string;
   disabled: boolean;
@@ -18,7 +23,11 @@ export function ChatModelProviderRail(props: {
     ...props.providers.filter((id) => !order().includes(id)),
   ]);
   const items = createMemo(() => [
-    ...providers().map((id) => ({ id, label: providerDisplayLabel(id), draggable: true })),
+    ...providers().map((id) => ({
+      id,
+      label: providerDisplayLabel(id, props.presentation(id)),
+      draggable: true,
+    })),
     ...props.targets.map((group) => ({
       id: `target:${group.id}`,
       label: group.label,
@@ -27,6 +36,8 @@ export function ChatModelProviderRail(props: {
   ]);
   let root!: HTMLDivElement;
   let source: string | undefined;
+  let dragOrigin = { x: 0, y: 0 };
+  const [dragOffset, setDragOffset] = createSignal({ x: 0, y: 0 });
   const [drag, setDrag] = createSignal<{ from: number; to: number }>();
   const [announcement, announce] = createSignal("");
   const move = (id: string, to: number) => {
@@ -39,7 +50,7 @@ export function ChatModelProviderRail(props: {
     next.splice(to, 0, id);
     setOrder(next);
     saveModelProviderOrder(next);
-    announce(`${providerDisplayLabel(id)}, ${to + 1} / ${next.length}`);
+    announce(`${providerDisplayLabel(id, props.presentation(id))}, ${to + 1} / ${next.length}`);
   };
   const tabs = createTabList(
     () => ({ active: props.active ?? null, onSelect: (id) => props.onSelect(id) }),
@@ -61,38 +72,35 @@ export function ChatModelProviderRail(props: {
   const endDrag = () => {
     source = undefined;
     setDrag(undefined);
+    setDragOffset({ x: 0, y: 0 });
   };
   return (
     <>
       <div
         ref={(element) => (root = element)}
         class="chat-controls__provider-rail"
+        data-dragging={drag() ? "" : undefined}
+        style={{
+          "--rail-drag-x": `${dragOffset().x}px`,
+          "--rail-drag-y": `${dragOffset().y}px`,
+        }}
         role="tablist"
         aria-label={t("chat.selectors.model")}
         aria-orientation="vertical"
+        onDragOver={(event) => {
+          if (source) {
+            setDragOffset({
+              x: event.clientX - dragOrigin.x,
+              y: event.clientY - dragOrigin.y,
+            });
+          }
+        }}
       >
         <For each={items()} keyed={(item) => item.id}>
           {(item) => (
-            <button
-              ref={[tabs.ref(item().id)]}
-              type="button"
-              role="tab"
-              class="chat-controls__provider-tab"
-              data-tab-value={item().id}
-              data-chat-model-provider-toggle={item().id}
-              aria-label={item().label}
-              aria-selected={props.active === item().id ? "true" : "false"}
-              tabindex={tabs.tabIndex(item().id)}
-              disabled={props.disabled}
-              draggable={item().draggable && !props.disabled ? "true" : "false"}
-              style={{ "--rail-shift": `${shift(item().id)}px` }}
-              data-dragging={drag()?.from === providers().indexOf(item().id) ? "" : undefined}
-              onDragStart={(event) => {
-                source = item().id;
-                const index = providers().indexOf(source);
-                setDrag({ from: index, to: index });
-                event.dataTransfer?.setData("text/plain", source);
-              }}
+            <Tooltip
+              content={item().label}
+              disabled={props.active === item().id}
               onDragOver={(event) => {
                 if (source && item().draggable) {
                   event.preventDefault();
@@ -109,45 +117,73 @@ export function ChatModelProviderRail(props: {
                 }
                 endDrag();
               }}
-              onDragEnd={endDrag}
-              onClick={(event) => {
-                event.stopPropagation();
-                tabs.onClick(event);
-              }}
-              onKeyDown={(event) => {
-                const offset = ["ArrowUp", "ArrowLeft"].includes(event.key)
-                  ? -1
-                  : ["ArrowDown", "ArrowRight"].includes(event.key)
-                    ? 1
-                    : 0;
-                if (event.altKey && offset && item().draggable) {
-                  event.preventDefault();
-                  const id = item().id;
-                  move(id, providers().indexOf(id) + offset);
-                  queueMicrotask(() => tabs.element(id)?.focus({ preventScroll: true }));
-                } else if (!event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
-                  event.preventDefault();
-                  const values = items();
-                  const next =
-                    values[
-                      (values.findIndex(({ id }) => id === item().id) + offset + values.length) %
-                        values.length
-                    ];
-                  if (next) {
-                    props.onSelect(next.id);
-                    tabs.element(next.id)?.focus({ preventScroll: true });
-                  }
-                } else {
-                  tabs.onKeyDown(event);
-                }
-              }}
             >
-              {item().draggable ? (
-                <ChatModelProviderIcon provider={item().id} />
-              ) : (
-                <ChatModelTargetIcon />
-              )}
-            </button>
+              <button
+                ref={[tabs.ref(item().id)]}
+                type="button"
+                role="tab"
+                class="chat-controls__provider-tab"
+                data-tab-value={item().id}
+                data-chat-model-provider-toggle={item().id}
+                aria-label={item().label}
+                aria-selected={props.active === item().id ? "true" : "false"}
+                tabindex={tabs.tabIndex(item().id)}
+                disabled={props.disabled}
+                draggable={item().draggable && !props.disabled ? "true" : "false"}
+                style={{ "--rail-shift": `${shift(item().id)}px` }}
+                data-dragging={drag()?.from === providers().indexOf(item().id) ? "" : undefined}
+                onDragStart={(event) => {
+                  source = item().id;
+                  dragOrigin = { x: event.clientX, y: event.clientY };
+                  const index = providers().indexOf(source);
+                  setDrag({ from: index, to: index });
+                  event.dataTransfer?.setData("text/plain", source);
+                  // Paint the moving tab in the rail instead of the browser's drag image.
+                  event.dataTransfer?.setDragImage(document.createElement("canvas"), 0, 0);
+                }}
+                onDragEnd={endDrag}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  tabs.onClick(event);
+                }}
+                onKeyDown={(event) => {
+                  const offset = ["ArrowUp", "ArrowLeft"].includes(event.key)
+                    ? -1
+                    : ["ArrowDown", "ArrowRight"].includes(event.key)
+                      ? 1
+                      : 0;
+                  if (event.altKey && offset && item().draggable) {
+                    event.preventDefault();
+                    const id = item().id;
+                    move(id, providers().indexOf(id) + offset);
+                    queueMicrotask(() => tabs.element(id)?.focus({ preventScroll: true }));
+                  } else if (!event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+                    event.preventDefault();
+                    const values = items();
+                    const next =
+                      values[
+                        (values.findIndex(({ id }) => id === item().id) + offset + values.length) %
+                          values.length
+                      ];
+                    if (next) {
+                      props.onSelect(next.id);
+                      tabs.element(next.id)?.focus({ preventScroll: true });
+                    }
+                  } else {
+                    tabs.onKeyDown(event);
+                  }
+                }}
+              >
+                {item().draggable ? (
+                  <ChatModelProviderIcon
+                    provider={item().id}
+                    presentation={props.presentation(item().id)}
+                  />
+                ) : (
+                  <ChatModelTargetIcon />
+                )}
+              </button>
+            </Tooltip>
           )}
         </For>
       </div>
