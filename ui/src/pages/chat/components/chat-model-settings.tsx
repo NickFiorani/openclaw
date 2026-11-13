@@ -1,18 +1,15 @@
-import { createMemo, For } from "solid-js";
+import { createMemo, createUniqueId, For, Show } from "solid-js";
+import { Icon } from "../../../components/solid/icon.tsx";
+import { Popover, type PopoverHandle } from "../../../components/solid/popover.tsx";
 import { formatModelRuntimeLabel } from "../../../lib/model-runtime-label.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
-import { ChatContextWindowControl } from "./chat-context-window-control.tsx";
-import type { ChatModelAccountSection } from "./chat-model-account-control.ts";
-import { ChatModelAccountSectionView } from "./chat-model-account-control.tsx";
-import type { ChatModelPickerOption } from "./chat-model-picker-options.ts";
+import { modelProviderId, type ChatModelPickerOption } from "./chat-model-picker-options.ts";
 import type { ChatModelPickerParams } from "./chat-model-picker.tsx";
 
 export const modelRuntimeId = (option: ChatModelPickerOption) =>
   option.agentRuntimeId ??
   option.agentRuntime ??
   (option.provider === "claude-cli" ? "claude-cli" : "openclaw");
-export const modelProviderId = (option: ChatModelPickerOption) =>
-  option.provider === "claude-cli" ? "anthropic" : option.provider;
 
 export function providerRuntimeOptions(
   options: ChatModelPickerOption[],
@@ -31,6 +28,8 @@ export function ChatModelRuntimeControl(props: {
   disabled: boolean;
   onSelect: (runtime: string, option: ChatModelPickerOption | undefined) => void;
 }) {
+  const infoId = createUniqueId();
+  let info: PopoverHandle | undefined;
   const runtimes = createMemo(() => [...new Set(props.options.map(modelRuntimeId))]);
   const option = (runtime: string) =>
     props.options.find(
@@ -51,9 +50,55 @@ export function ChatModelRuntimeControl(props: {
   };
   return (
     <div class="chat-controls__runtime-row">
-      <span class="chat-controls__settings-label">{t("chat.modelControls.runsOn")}</span>
+      <span class="chat-controls__settings-label">
+        {t("chat.modelControls.runsOn")}
+        <Show
+          when={
+            props.options[0] &&
+            modelProviderId(props.options[0]) === "anthropic" &&
+            runtimes().every((runtime) => formatModelRuntimeLabel("anthropic", runtime, t)?.detail)
+          }
+        >
+          <Popover
+            ref={(handle) => (info = handle)}
+            id={infoId}
+            label={t("chat.modelControls.runsOn")}
+            triggerClass="chat-controls__runtime-info"
+            class="chat-controls__settings-popover chat-controls__runtime-details"
+            placement="top-start"
+            sameRoot
+            trigger={<Icon name="info" />}
+          >
+            <div class="chat-controls__runtime-details-content">
+              <div class="chat-controls__runtime-details-header">
+                <span>{t("chat.modelControls.runsOn")}</span>
+                <button
+                  class="chat-controls__runtime-details-close"
+                  type="button"
+                  aria-label={t("common.close")}
+                  onClick={() => info?.hide()}
+                >
+                  <Icon name="x" />
+                </button>
+              </div>
+              <For each={runtimes()}>
+                {(runtime) => (
+                  <div>
+                    <div class="chat-controls__runtime-detail-label">
+                      {formatModelRuntimeLabel("anthropic", runtime, t)?.label}
+                    </div>
+                    <div class="chat-controls__runtime-detail-copy">
+                      {formatModelRuntimeLabel("anthropic", runtime, t)?.detail}
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Popover>
+        </Show>
+      </span>
       <div
-        class="settings-segmented settings-segmented--compact"
+        class="chat-controls__runtime-segments"
         role="group"
         aria-label={t("chat.modelControls.runsOn")}
       >
@@ -70,8 +115,8 @@ export function ChatModelRuntimeControl(props: {
               <button
                 type="button"
                 class={[
-                  "settings-segmented__btn",
-                  { "settings-segmented__btn--active": props.selected === runtime },
+                  "chat-controls__runtime-option",
+                  { "chat-controls__runtime-option--active": props.selected === runtime },
                 ]}
                 data-chat-model-runtime={runtime}
                 aria-pressed={props.selected === runtime ? "true" : "false"}
@@ -95,7 +140,6 @@ export function ChatModelRuntimeControl(props: {
 
 export function ChatModelSettings(props: {
   params: ChatModelPickerParams;
-  account: ReturnType<ChatModelAccountSection["viewProps"]> | undefined;
   providers: Map<string, ChatModelPickerOption[]>;
   provider: string | undefined;
   runtime: (provider: string) => string;
@@ -107,7 +151,7 @@ export function ChatModelSettings(props: {
 }) {
   const options = createMemo(() => props.providers.get(props.provider ?? "") ?? []);
   return (
-    <div class="chat-controls__model-settings-block">
+    <>
       {new Set(options().map(modelRuntimeId)).size > 1 ? (
         <ChatModelRuntimeControl
           options={options()}
@@ -125,13 +169,6 @@ export function ChatModelSettings(props: {
           onSelect={(runtime, option) => props.onRuntimeSelect(props.provider!, runtime, option)}
         />
       ) : undefined}
-      {props.params.contextWindow ? (
-        <ChatContextWindowControl
-          contextWindow={props.params.contextWindow}
-          sessionKey={props.params.sessionKey}
-        />
-      ) : undefined}
-      {props.account ? <ChatModelAccountSectionView {...props.account} /> : undefined}
-    </div>
+    </>
   );
 }

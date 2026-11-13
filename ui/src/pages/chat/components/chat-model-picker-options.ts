@@ -1,3 +1,5 @@
+import type { ModelCatalogEntry } from "../../../api/types.ts";
+import type { ProviderPresentation } from "../../../components/provider-icon-data.ts";
 import {
   formatRawProviderLabel,
   providerDisplayLabel,
@@ -5,11 +7,14 @@ import {
 import { t } from "../../../i18n/index.ts";
 import { registerModelControlsEnglish } from "../../../i18n/locales/en-model-controls.ts";
 import { formatContextTokenCapacity } from "../../../lib/format.ts";
-import type { ModelRuntimeEntry } from "../../../lib/model-runtime-choice.ts";
+import type { ChatContextWindowControlParams } from "./chat-context-window-control.tsx";
+import type { ChatModelPickerParams } from "./chat-model-picker.tsx";
 
 registerModelControlsEnglish();
 
 export type ChatModelPickerOption = {
+  /** Configured provider branding from the admitted catalog row. */
+  presentation?: ProviderPresentation;
   agentRuntimeId?: string;
   /** Null is an unknown configured base; undefined is an ordinary model-only row. Both clear a prior pin. */
   agentRuntime?: string | null;
@@ -19,9 +24,8 @@ export type ChatModelPickerOption = {
   contextTokens?: number;
   contextWindow?: number;
   disabled?: boolean;
-  unavailableReason?: ModelRuntimeEntry["unavailableReason"];
+  unavailableReason?: ModelCatalogEntry["unavailableReason"];
   unavailableUntil?: number;
-  expiryLabel?: string;
   isDefault: boolean;
   label: string;
   provider: string;
@@ -54,12 +58,12 @@ export function formatModelContextMeta(
   const maximum = option.contextWindow;
   if (active && maximum && active < maximum) {
     return translate("chat.modelControls.contextActiveAndMax", {
-      active: formatContextTokenCapacity(active),
-      maximum: formatContextTokenCapacity(maximum),
+      active: formatContextTokenCapacity(active, 0),
+      maximum: formatContextTokenCapacity(maximum, 0),
     });
   }
   const capacity = active || maximum;
-  return capacity ? formatContextTokenCapacity(capacity) : "";
+  return capacity ? formatContextTokenCapacity(capacity, 0) : "";
 }
 
 /** Owners omit completed empty groups; a published group has rows or an active receipt. */
@@ -74,11 +78,11 @@ export type ChatModelPickerTargetGroup = {
 };
 
 export function formatModelLabel(
-  option: Pick<ChatModelPickerOption, "label" | "provider">,
+  option: Pick<ChatModelPickerOption, "label" | "provider" | "presentation">,
 ): string {
   const prefixes = [
     formatRawProviderLabel(option.provider),
-    providerDisplayLabel(option.provider),
+    providerDisplayLabel(option.provider, option.presentation),
   ].toSorted((left, right) => right.length - left.length);
   for (const prefix of prefixes) {
     if (option.label.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) {
@@ -95,6 +99,8 @@ export function formatModelLabel(
 }
 
 export type ChatModelPickerOptionProps = {
+  contextWindow?: ChatContextWindowControlParams;
+  sessionKey?: string;
   disabled: boolean;
   entry: ChatModelPickerOption;
   index: number;
@@ -112,3 +118,71 @@ export type ChatModelPickerTargetOptionProps = {
   index: number;
   onSelect: (groupId: string, value: string, event: MouseEvent) => void;
 };
+
+export const modelProviderId = (option: ChatModelPickerOption) =>
+  option.provider === "claude-cli" ? "anthropic" : option.provider;
+
+export function prepareChatModelPickerPanel(
+  params: Pick<
+    ChatModelPickerParams,
+    "modelOptions" | "selectedModelValue" | "selectedAgentRuntime" | "targetGroups"
+  >,
+) {
+  const defaultModelOption = params.modelOptions.find((option) => option.isDefault);
+  const activeModelOption = params.modelOptions.find((option) =>
+    isModelPickerOptionSelected(option, params.selectedModelValue, params.selectedAgentRuntime),
+  );
+  const leadingModelOption = activeModelOption ?? defaultModelOption;
+  const groupProvider = modelProviderId;
+  // Default restores inheritance; it stays ahead of ranked model choices. When a
+  // provider recommends models, they follow, and the rest collapse under "All models".
+  const recommendingProviders = new Set(
+    params.modelOptions.filter((option) => option.recommended).map(groupProvider),
+  );
+  const providerGroups = new Map<
+    string,
+    { lead: ChatModelPickerOption[]; more: ChatModelPickerOption[] }
+  >();
+  for (const option of params.modelOptions) {
+    const provider = groupProvider(option);
+    const group = providerGroups.get(provider) ?? { lead: [], more: [] };
+    if (option.isDefault) {
+      group.lead.unshift(option);
+    } else if (option === leadingModelOption) {
+      group.lead.splice(group.lead[0]?.isDefault ? 1 : 0, 0, option);
+    } else if (option.recommended || !recommendingProviders.has(provider)) {
+      group.lead.push(option);
+    } else {
+      group.more.push(option);
+    }
+    providerGroups.set(provider, group);
+  }
+  // Unranked catalogs can contain hundreds of models; browse the rest through All models.
+  for (const [provider, group] of providerGroups) {
+    if (!recommendingProviders.has(provider)) {
+      group.more = group.lead.splice(9);
+    }
+  }
+  const orderedProviderGroups = [...providerGroups];
+  const leadingProvider = leadingModelOption && groupProvider(leadingModelOption);
+  const activeProvider = activeModelOption && groupProvider(activeModelOption);
+
+  const orderedOptions = orderedProviderGroups.flatMap(([, { lead, more }]) => [...lead, ...more]);
+  const optionIndex = new Map(
+    orderedOptions.map((option, index) => [modelPickerOptionKey(option), index]),
+  );
+  const targetGroups = params.targetGroups ?? [];
+  const targetOptionCount = targetGroups.reduce((count, group) => count + group.options.length, 0);
+  const hasOptions = params.modelOptions.length > 0 || targetGroups.length > 0;
+  const hasSelectableModelOptions = params.modelOptions.some((option) => !option.disabled);
+  return {
+    orderedProviderGroups,
+    activeProvider: activeProvider ?? leadingProvider ?? orderedProviderGroups[0]?.[0],
+    orderedOptions,
+    optionIndex,
+    targetGroups,
+    targetOptionCount,
+    hasOptions,
+    hasSelectableModelOptions,
+  };
+}

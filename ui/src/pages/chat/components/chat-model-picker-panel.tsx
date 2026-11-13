@@ -1,15 +1,24 @@
 import type { JSX } from "@solidjs/web";
 import { createMemo, createSignal, Errored, For, Loading, Show, useContext } from "solid-js";
-import { providerDisplayLabel } from "../../../components/provider-icon-data.ts";
+import { providerDisplayLabel as defaultProviderLabel } from "../../../components/provider-icon-data.ts";
+import { IconButton } from "../../../components/solid/icon-button.tsx";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { registerSettingsEnglish } from "../../../i18n/locales/en-settings.ts";
-import { canonicalModelAuthProviderId } from "../../../lib/model-auth.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
-import { ChatModelAccountSectionView } from "./chat-model-account-control.tsx";
+import {
+  ChatModelAccountOptions,
+  ChatModelAccountSectionView,
+} from "./chat-model-account-control.tsx";
 import { ChatModelAuthState, modelAuthState } from "./chat-model-auth-state.tsx";
-import { ChatModelCatalogRefresh, ChatModelCatalogState } from "./chat-model-catalog-state.tsx";
+import {
+  ChatModelCatalogRefresh,
+  ChatModelCatalogState,
+  isModelCatalogLoading,
+} from "./chat-model-catalog-state.tsx";
 import {
   isModelPickerOptionSelected,
+  modelProviderId,
+  prepareChatModelPickerPanel,
   modelPickerOptionKey,
   type ChatModelPickerOption as ModelPickerOption,
   type ChatModelPickerTargetGroup,
@@ -31,76 +40,10 @@ import { ChatModelProviderRail } from "./chat-model-provider-rail.tsx";
 import {
   ChatModelSettings,
   modelRuntimeId,
-  modelProviderId,
   providerRuntimeOptions,
 } from "./chat-model-settings.tsx";
 
 registerSettingsEnglish();
-
-function prepareChatModelPickerPanel(
-  params: Pick<
-    ChatModelPickerParams,
-    "modelOptions" | "selectedModelValue" | "selectedAgentRuntime" | "targetGroups"
-  >,
-) {
-  const defaultModelOption = params.modelOptions.find((option) => option.isDefault);
-  const activeModelOption = params.modelOptions.find((option) =>
-    isModelPickerOptionSelected(option, params.selectedModelValue, params.selectedAgentRuntime),
-  );
-  const leadingModelOption = activeModelOption ?? defaultModelOption;
-  const groupProvider = modelProviderId;
-  // Default restores inheritance; it stays ahead of ranked model choices. When a
-  // provider recommends models, they follow, and the rest collapse under "All models".
-  const recommendingProviders = new Set(
-    params.modelOptions.filter((option) => option.recommended).map(groupProvider),
-  );
-  const providerGroups = new Map<
-    string,
-    { lead: ModelPickerOption[]; more: ModelPickerOption[] }
-  >();
-  for (const option of params.modelOptions) {
-    const provider = groupProvider(option);
-    const group = providerGroups.get(provider) ?? { lead: [], more: [] };
-    if (option.isDefault) {
-      group.lead.unshift(option);
-    } else if (option === leadingModelOption) {
-      group.lead.splice(group.lead[0]?.isDefault ? 1 : 0, 0, option);
-    } else if (option.recommended || !recommendingProviders.has(provider)) {
-      group.lead.push(option);
-    } else {
-      group.more.push(option);
-    }
-    providerGroups.set(provider, group);
-  }
-  // Unranked catalogs can contain hundreds of models; browse the rest through All models.
-  for (const [provider, group] of providerGroups) {
-    if (!recommendingProviders.has(provider)) {
-      group.more = group.lead.splice(9);
-    }
-  }
-  const orderedProviderGroups = [...providerGroups];
-  const leadingProvider = leadingModelOption && groupProvider(leadingModelOption);
-  const activeProvider = activeModelOption && groupProvider(activeModelOption);
-
-  const orderedOptions = orderedProviderGroups.flatMap(([, { lead, more }]) => [...lead, ...more]);
-  const optionIndex = new Map(
-    orderedOptions.map((option, index) => [modelPickerOptionKey(option), index]),
-  );
-  const targetGroups = params.targetGroups ?? [];
-  const targetOptionCount = targetGroups.reduce((count, group) => count + group.options.length, 0);
-  const hasOptions = params.modelOptions.length > 0 || targetGroups.length > 0;
-  const hasSelectableModelOptions = params.modelOptions.some((option) => !option.disabled);
-  return {
-    orderedProviderGroups,
-    activeProvider: activeProvider ?? leadingProvider ?? orderedProviderGroups[0]?.[0],
-    orderedOptions,
-    optionIndex,
-    targetGroups,
-    targetOptionCount,
-    hasOptions,
-    hasSelectableModelOptions,
-  };
-}
 
 function ModelList(props: { label: string; id: string; more?: boolean; children: JSX.Element }) {
   const search = useContext(ChatModelSearchContext);
@@ -118,14 +61,23 @@ function ModelList(props: { label: string; id: string; more?: boolean; children:
   );
 }
 
-export function ChatModelPickerPanel(panel: {
+type ChatModelPickerPanelProps = {
   params: ChatModelPickerParams;
   onSelectionClose: (event: MouseEvent) => void;
   searchRef: (element: HTMLInputElement) => void;
-}) {
+};
+
+export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
   const search = useContext(ChatModelSearchContext);
+  // Restart CSS without remounting the list or disturbing a focused model row.
+  const [providerTransition, setProviderTransition] = createSignal(false);
   // Parent controls also publish effort and copy changes; retain unchanged model facts.
   const modelOptions = createMemo(() => panel.params.modelOptions);
+  const providerPresentation = (provider: string) =>
+    modelOptions().find((option) => option.provider === provider && option.presentation)
+      ?.presentation;
+  const providerDisplayLabel = (provider: string) =>
+    defaultProviderLabel(provider, providerPresentation(provider));
   const modelTargetGroups = createMemo(() => panel.params.targetGroups);
   const selectedModelValue = createMemo(() => panel.params.selectedModelValue);
   const selectedAgentRuntime = createMemo(() => panel.params.selectedAgentRuntime);
@@ -156,6 +108,11 @@ export function ChatModelPickerPanel(panel: {
       selectedModelValue: selectedModelValue(),
       selectedAgentRuntime: selectedAgentRuntime(),
     }),
+  );
+  const showBrowser = createMemo(
+    () =>
+      state().hasOptions ||
+      (panel.params.accountSection && !isModelCatalogLoading(panel.params.modelCatalogState)),
   );
   const accounts = createMemo(() =>
     panel.params.accountSection?.viewProps(
@@ -260,10 +217,7 @@ export function ChatModelPickerPanel(panel: {
   const layout = createMemo<string[]>(() => {
     if (searchView?.filtering()) {
       return [
-        ...searchView
-          .matches()
-          .filter(({ row }) => row.list !== "accounts")
-          .map(({ row }) => row.key),
+        ...searchView.matches().map(({ row }) => row.key),
         ...state()
           .targetGroups.filter((group) => !group.options.length)
           .map((group) => `state:target:${group.id}`),
@@ -358,16 +312,17 @@ export function ChatModelPickerPanel(panel: {
   );
   function CatalogStatus() {
     return (
-      <>
+      <Show when={!activeAuth() || panel.params.modelCatalogState?.status !== "ready"}>
         {renderCatalogStatus()(() => (
           <ChatModelCatalogState
+            loadingSkeleton
             state={panel.params.modelCatalogState}
             hasOptions={modelOptions().length > 0}
             hasSelectableOptions={state().hasSelectableModelOptions}
             onModelSetup={onModelSetup()}
           />
         ))}
-      </>
+      </Show>
     );
   }
   function TargetOptions(props: { group: ChatModelPickerTargetGroup }) {
@@ -441,6 +396,8 @@ export function ChatModelPickerPanel(panel: {
             selectedAgentRuntime={selectedAgentRuntime()}
             sessionModelPinned={sessionModelPinned()}
             onSelect={selectModel}
+            contextWindow={panel.params.contextWindow}
+            sessionKey={panel.params.sessionKey}
           />
         ))}
       </>
@@ -454,19 +411,21 @@ export function ChatModelPickerPanel(panel: {
     const provider = createMemo(() => props.provider);
     const providerLabel = () => providerDisplayLabel(props.provider);
     const groupLabel = () => t("chat.modelControls.providerModels", { provider: providerLabel() });
-    const auth = () => panel.params.providerAuth?.get(canonicalModelAuthProviderId(props.provider));
+    const options = () => [...props.lead, ...props.more];
+    const auth = () => panel.params.providerAuth?.get(props.provider);
     const authKind = () => auth()?.kind;
-    const showAuth = () => Boolean(auth());
-    const authLabel = () => (showAuth() ? auth()?.label : undefined);
-    const authHelp = () => {
-      const expiryLabel = props.lead[0]?.expiryLabel;
-      return [
-        auth()?.detail,
-        expiryLabel ? t("modelProviders.expiresIn", { time: expiryLabel }) : undefined,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    };
+    const showAuth = createMemo(
+      () =>
+        Boolean(auth()) &&
+        !options().some(
+          (option) =>
+            option.disabled &&
+            (option.unavailableReason === "missing-auth" ||
+              option.unavailableReason === "auth-failed"),
+        ),
+    );
+    const authLabel = () =>
+      showAuth() ? [auth()?.label, auth()?.detail].filter(Boolean).join(" · ") : undefined;
     return (
       <section
         class="chat-controls__provider-model-group"
@@ -476,31 +435,31 @@ export function ChatModelPickerPanel(panel: {
         {renderRow(`heading:${provider()}`, () => (
           <div class="chat-controls__provider-heading" data-chat-model-provider={props.provider}>
             <span class="chat-controls__provider-label">{providerLabel()}</span>
-            {showAuth() ? (
+            {props.provider === state().activeProvider &&
+            !modelAuthState(options()) &&
+            accounts() ? (
+              <ChatModelAccountSectionView {...accounts()!} />
+            ) : showAuth() ? (
               <span class="chat-controls__auth-meta" data-auth-kind={authKind()}>
-                <openclaw-tooltip prop:content={authHelp()}>
-                  <span
-                    class="chat-controls__auth-meta-label"
-                    tabindex={authHelp() ? 0 : undefined}
-                  >
-                    {authKind() === "api" ? t("modelProviders.status.apiKey") : authLabel()}
-                  </span>
-                </openclaw-tooltip>
+                <span class="chat-controls__auth-meta-label">
+                  {authKind() === "api" ? t("modelProviders.status.apiKey") : authLabel()}
+                </span>
               </span>
             ) : undefined}
             {panel.params.onProviderSettings ? (
-              <button
+              <IconButton
+                icon="settings"
+                size={28}
+                tooltip={false}
                 class="chat-controls__provider-settings"
                 data-chat-model-provider-settings
                 type="button"
-                aria-label={t("chat.modelControls.configureModels")}
+                label={t("chat.modelControls.configureModels")}
                 onClick={(event) => {
                   event.stopPropagation();
                   panel.params.onProviderSettings?.(props.provider);
                 }}
-              >
-                <Icon name="settings" />
-              </button>
+              />
             ) : undefined}
           </div>
         ))}
@@ -550,7 +509,15 @@ export function ChatModelPickerPanel(panel: {
       class="chat-controls__inline-select-menu chat-controls__model-menu"
       aria-label={t("chat.selectors.model")}
       data-chat-model-filtering={searchView?.filtering() ? "" : undefined}
-      data-chat-model-compact={modelSelectionLocked() || !state().hasOptions ? "" : undefined}
+      data-chat-model-compact={
+        modelSelectionLocked() ||
+        (!state().hasOptions &&
+          panel.params.modelCatalogState?.status === "ready" &&
+          !isModelCatalogLoading(panel.params.modelCatalogState) &&
+          panel.params.modelCatalogState.modelSelectionPolicy?.restricted)
+          ? ""
+          : undefined
+      }
     >
       {modelSelectionLocked() ? (
         <div class="chat-controls__locked-model" aria-label={t("chat.selectors.modelLockedLabel")}>
@@ -559,7 +526,7 @@ export function ChatModelPickerPanel(panel: {
         </div>
       ) : (
         <>
-          {state().hasOptions ? (
+          {showBrowser() || isModelCatalogLoading(panel.params.modelCatalogState) ? (
             <div class="chat-controls__model-search-wrap">
               <Icon name="search" />
               <input
@@ -587,25 +554,40 @@ export function ChatModelPickerPanel(panel: {
                 onKeyDown={handleModelSearchKeydown}
               />
               {modelOptions().length > 0 ? (
-                <ChatModelCatalogRefresh state={panel.params.modelCatalogState} />
+                <ChatModelCatalogRefresh
+                  state={panel.params.modelCatalogState}
+                  providerLabel={providerDisplayLabel}
+                />
               ) : undefined}
             </div>
           ) : undefined}
-          {!state().hasOptions ? <CatalogStatus /> : undefined}
-          {state().hasOptions ? (
+          {!showBrowser() ? <CatalogStatus /> : undefined}
+          {showBrowser() ? (
             <>
-              <div class="chat-controls__model-browser">
-                <ChatModelProviderRail
-                  providers={state().orderedProviderGroups.map(([provider]) => provider)}
-                  targets={state().targetGroups}
-                  active={catalog().providers.find((provider) =>
-                    searchView?.providerOpen(provider),
-                  )}
-                  disabled={disabled()}
-                  onSelect={(provider) => searchView?.toggleProvider(provider)}
-                />
+              <div
+                class="chat-controls__model-browser"
+                data-single-provider={catalog().providers.length === 1 ? "" : undefined}
+              >
+                <Show when={catalog().providers.length !== 1 && !searchView?.filtering()}>
+                  <ChatModelProviderRail
+                    providers={state().orderedProviderGroups.map(([provider]) => provider)}
+                    presentation={providerPresentation}
+                    targets={state().targetGroups}
+                    active={catalog().providers.find((provider) =>
+                      searchView?.providerOpen(provider),
+                    )}
+                    disabled={disabled()}
+                    onSelect={(provider) => {
+                      if (!searchView?.providerOpen(provider)) {
+                        setProviderTransition((previous) => !previous);
+                      }
+                      searchView?.toggleProvider(provider);
+                    }}
+                  />
+                </Show>
                 <div
                   class="chat-controls__model-pane"
+                  data-provider-transition={providerTransition() ? "a" : "b"}
                   data-auth-blocked={activeAuth() ? "" : undefined}
                 >
                   <div
@@ -626,6 +608,11 @@ export function ChatModelPickerPanel(panel: {
                           />
                         )}
                       </For>
+                      <Show when={searchView?.filtering() && accounts()}>
+                        {(account) => (
+                          <ChatModelAccountOptions {...account()} renderRow={renderRow} />
+                        )}
+                      </Show>
                       <For each={state().targetGroups} keyed={(group) => group.id}>
                         {(group) => {
                           const id = createMemo(() => group().id);
@@ -653,6 +640,37 @@ export function ChatModelPickerPanel(panel: {
                       </For>
                     </div>
                   </div>
+                  <Show when={activeAuth()}>
+                    {(auth) => <ChatModelAuthState state={auth()} onSetup={onModelSetup()} />}
+                  </Show>
+                  <Show when={!searchView?.filtering()}>
+                    <ChatModelSettings
+                      params={panel.params}
+                      providers={providerOptions()}
+                      provider={catalog().providers.find((provider) =>
+                        searchView?.providerOpen(provider),
+                      )}
+                      runtime={providerRuntime}
+                      onRuntimeSelect={(provider, runtime, entry) => {
+                        if (entry?.disabled) {
+                          onModelSetup()?.();
+                          return;
+                        }
+                        setRuntimeOverrides((previous) => ({ ...previous, [provider]: runtime }));
+                        if (
+                          entry &&
+                          (entry.value === selectedModelValue() ||
+                            (entry.isDefault && !selectedModelValue()))
+                        ) {
+                          void panel.params.onModelSelect(
+                            entry.commitValue,
+                            panel.params.sessionKey,
+                            entry.runtimeOverride ?? null,
+                          );
+                        }
+                      }}
+                    />
+                  </Show>
                   <div
                     class="chat-controls__model-search-empty"
                     data-chat-model-search-empty
@@ -660,39 +678,9 @@ export function ChatModelPickerPanel(panel: {
                   >
                     {t("chat.modelControls.noMatchingModels")}
                   </div>
-                  <Show when={activeAuth()}>
-                    {(auth) => <ChatModelAuthState state={auth()} onSetup={onModelSetup()} />}
-                  </Show>
                   <CatalogStatus />
                 </div>
               </div>
-              <ChatModelSettings
-                params={panel.params}
-                account={accounts()}
-                providers={providerOptions()}
-                provider={catalog().providers.find((provider) =>
-                  searchView?.providerOpen(provider),
-                )}
-                runtime={providerRuntime}
-                onRuntimeSelect={(provider, runtime, entry) => {
-                  if (entry?.disabled) {
-                    onModelSetup()?.();
-                    return;
-                  }
-                  setRuntimeOverrides((previous) => ({ ...previous, [provider]: runtime }));
-                  if (
-                    entry &&
-                    (entry.value === selectedModelValue() ||
-                      (entry.isDefault && !selectedModelValue()))
-                  ) {
-                    void panel.params.onModelSelect(
-                      entry.commitValue,
-                      panel.params.sessionKey,
-                      entry.runtimeOverride ?? null,
-                    );
-                  }
-                }}
-              />
             </>
           ) : undefined}
         </>

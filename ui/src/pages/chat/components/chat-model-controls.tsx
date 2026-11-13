@@ -119,6 +119,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
         t("chat.selectors.lockedSessionModel"),
         t("chat.modelControls.api"),
         t("chat.modelControls.subscription"),
+        t("chat.modelControls.nativeLogin"),
         t("modelSetup.candidates.signInNeeded"),
       ] as const;
     },
@@ -156,28 +157,43 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
     const catalogOwnsChoices = retired || uninitialized || policy?.restricted === true;
     const selectionScopeLabel = MODEL_SELECTION_SCOPE_LABELS.get(modelSelectionTarget ?? "");
     const providerAuth = new Map<string, ModelProviderAuthLabel>();
-    const providerExpiry = new Map<string, string>();
-    const headingKey = (id: string) =>
-      normalizeChatModelProviderGroupId(
-        canonicalModelAuthProviderId(normalizeChatModelProviderId(id)),
-      );
+    const headingKey = (id: string) => {
+      const provider = normalizeChatModelProviderId(id);
+      // Usage aliases are not billing identities: Claude CLI's native account
+      // and the direct Anthropic API connection own separate picker headings.
+      return provider === "claude-cli"
+        ? provider
+        : normalizeChatModelProviderGroupId(canonicalModelAuthProviderId(provider));
+    };
     // Alias records (e.g. google and google-gemini-cli) share one heading, so merge
     // them under that key first; iterating raw records let the later one overwrite it.
     for (const provider of listEffectiveModelAuthProviders(
-      (modelAuthStatusResult?.providers ?? []).map((record) =>
-        Object.assign({}, record, { provider: headingKey(record.provider) }),
-      ),
+      modelAuthStatusResult?.providers ?? [],
+      headingKey,
     )) {
       const selectedId =
         accountSelection?.kind === "automatic" ? undefined : accountSelection?.authProfileId;
-      const profile = provider.profiles.find((entry) => entry.profileId === selectedId);
-      const expiry = (profile ? profile.expiry : provider.expiry)?.label;
-      if (expiry) {
-        providerExpiry.set(headingKey(provider.provider), expiry);
-      }
-      const auth = describeModelProviderAuth(provider, { authProfileId: selectedId });
+      const selectedProfile =
+        selectedId && provider.provider === "claude-cli"
+          ? modelAuthStatusResult?.providers
+              .filter((record) => canonicalModelAuthProviderId(record.provider) === "anthropic")
+              .flatMap((record) => record.profiles)
+              .find((profile) => profile.profileId === selectedId)
+          : undefined;
+      const auth = describeModelProviderAuth(
+        selectedProfile ? { ...provider, profiles: [selectedProfile] } : provider,
+        { authProfileId: selectedId },
+      );
       if (auth) {
         providerAuth.set(headingKey(provider.provider), auth);
+        // A saved account can serve either runtime, but the direct API's
+        // automatic credential summary must not label native CLI login.
+        if (
+          provider.provider === "anthropic" &&
+          provider.profiles.some((profile) => profile.profileId === selectedId)
+        ) {
+          providerAuth.set("claude-cli", auth);
+        }
       }
     }
     const {
@@ -242,7 +258,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
         commitValue: isDefault ? "" : option.value,
         isDefault,
         value: option.value,
-        label: resolveChatModelPickerLabel(catalogEntry, option.label, null),
+        label: resolveChatModelPickerLabel(catalogEntry, option.label),
         contextTokens: catalogEntry?.contextTokens,
         contextWindow: catalogEntry?.contextWindow,
         supportsTools: catalogEntry?.supportsTools,
@@ -259,7 +275,9 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
               : "",
         ),
       };
-      pickerOption.expiryLabel = providerExpiry.get(headingKey(pickerOption.provider));
+      if (catalogEntry?.providerName || catalogEntry?.providerIcon) {
+        pickerOption.presentation = catalogEntry;
+      }
       if (agentRuntimeId) {
         pickerOption.agentRuntimeId = agentRuntimeId;
       }
@@ -276,7 +294,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
           value: option.value,
           commitValue: option.value,
           isDefault: false,
-          label: resolveChatModelPickerLabel(catalogEntry, option.label, null),
+          label: resolveChatModelPickerLabel(catalogEntry, option.label, choice.agentRuntime.id),
           provider: pickerOption.provider,
           agentRuntime: choice.agentRuntime.id,
           runtimeOverride: choice.agentRuntime.id,
@@ -287,7 +305,6 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
           disabled: choice.available === false,
           unavailableReason: choice.unavailableReason,
           unavailableUntil: choice.unavailableUntil,
-          expiryLabel: pickerOption.expiryLabel,
           recommended: pickerOption.recommended,
         });
       }

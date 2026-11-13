@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { registerMenuShortcuts } from "../../../components/menu-shortcuts.ts";
 import { mountSolid } from "../../../test-helpers/mount-solid.ts";
@@ -473,11 +473,11 @@ it("windows a large catalog while keeping keyboard choices and accessible positi
   expect(params.onModelSelect).toHaveBeenCalledWith("example/model-999", "main", undefined);
 });
 
-it("keeps the complete model panel above the composer", async () => {
+it("keeps the desktop panel fixed above its model chip across provider and search views", async () => {
   await page.viewport(1280, 900);
   container.style.cssText =
     "position:fixed;bottom:16px;right:16px;width:min(600px, calc(100vw - 32px))";
-  const { toggle, trigger, picker, composer } = mountPicker();
+  const { toggle, trigger, picker } = mountPicker();
   try {
     await toggle(async () => trigger.click());
     const menu = picker.querySelector<HTMLElement>(".chat-controls__model-menu")!;
@@ -485,9 +485,8 @@ it("keeps the complete model panel above the composer", async () => {
     await vi.waitFor(() => {
       const panel = menu.getBoundingClientRect();
       const bounds = surface.getBoundingClientRect();
-      expect(bounds.bottom).toBeLessThanOrEqual(
-        composer.parentElement!.parentElement!.getBoundingClientRect().top - 8,
-      );
+      expect(bounds.height).toBe(350);
+      expect(bounds.bottom).toBe(trigger.getBoundingClientRect().top - 8);
       expect(panel.bottom).toBeLessThanOrEqual(bounds.bottom);
       expect(menu.scrollHeight).toBeLessThanOrEqual(menu.clientHeight);
       expect(option("example/beta").getBoundingClientRect().bottom).toBeLessThanOrEqual(
@@ -498,12 +497,72 @@ it("keeps the complete model panel above the composer", async () => {
     const background = getComputedStyle(beta).backgroundColor;
     const highlighted = getSearch().getAttribute("aria-activedescendant");
     await page.getByText("Beta", { exact: true }).hover();
-    expect(getComputedStyle(beta).backgroundColor).toBe(background);
+    await vi.waitFor(() => expect(getComputedStyle(beta).backgroundColor).not.toBe(background));
     expect(getSearch().getAttribute("aria-activedescendant")).toBe(highlighted);
+    await page.getByRole("tab", { name: "Other", exact: true }).click();
+    await vi.waitFor(() => expect(option("other/gamma")?.checkVisibility()).toBe(true));
+    const search = getSearch();
+    search.value = "no matching model";
+    search.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    flush();
+    await vi.waitFor(() => {
+      expect(picker.querySelector('[role="tablist"]')).toBeNull();
+      expect(
+        picker.querySelector<HTMLElement>("[data-chat-model-search-empty]")?.checkVisibility(),
+      ).toBe(true);
+      expect(surface.getBoundingClientRect().height).toBe(350);
+    });
   } finally {
     container.removeAttribute("style");
   }
 });
+
+it.each([
+  [1440, 900, 350],
+  [390, 844, 448],
+])(
+  "sizes only locked and restricted-empty panels to content at %ipx",
+  async (width, height, fixedHeight) => {
+    await page.viewport(width, height);
+    const { params, update, open, picker } = mountPicker(false);
+    params.modelCatalogState = {
+      hasSnapshot: false,
+      status: "loading",
+      modelSelectionPolicy: { restricted: true, defaultModel: null },
+    };
+    update();
+    try {
+      await open();
+      const menu = picker.querySelector<HTMLElement>(".chat-controls__model-menu")!;
+      const surface = picker.querySelector<HTMLElement>(".chat-picker-overlay")!;
+      await vi.waitFor(() => expect(surface.getBoundingClientRect().height).toBe(fixedHeight));
+
+      params.modelCatalogState = {
+        ...params.modelCatalogState,
+        hasSnapshot: true,
+        status: "ready",
+      };
+      update();
+      await vi.waitFor(() => {
+        expect(menu.textContent).toContain("No models are permitted by your admin.");
+        expect(surface.getBoundingClientRect().height).toBeGreaterThan(0);
+        expect(surface.getBoundingClientRect().height).toBeLessThan(200);
+        expect(menu.getBoundingClientRect().height).toBe(surface.getBoundingClientRect().height);
+      });
+
+      params.modelSelectionLocked = true;
+      update();
+      await vi.waitFor(() => {
+        expect(picker.querySelector(".chat-controls__locked-model")).not.toBeNull();
+        expect(surface.getBoundingClientRect().height).toBeGreaterThan(0);
+        expect(surface.getBoundingClientRect().height).toBeLessThan(200);
+        expect(menu.getBoundingClientRect().height).toBe(surface.getBoundingClientRect().height);
+      });
+    } finally {
+      await page.viewport(1280, 720);
+    }
+  },
+);
 
 it("places provider recovery below the disabled model rows", async () => {
   const { params, update, open, picker } = mountPicker();
@@ -525,4 +584,99 @@ it("places provider recovery below the disabled model rows", async () => {
       picker.querySelector(".chat-picker-overlay")!.getBoundingClientRect().bottom - 8,
     );
   });
+});
+
+it.each(["cancel", "drop"])(
+  "keeps the dragged provider visible and restores tabs on %s",
+  async (end) => {
+    await page.viewport(1280, 900);
+    const { picker, open, params, update } = mountPicker();
+    params.modelOptions.push(modelOption("third", "delta", { label: "Delta" }));
+    update();
+    await open();
+    const tabs = [...picker.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const [selected, dragged] = tabs;
+    const orderKey = "openclaw.control.modelProviderOrder.v1";
+    const previousOrder = localStorage.getItem(orderKey);
+    onTestFinished(() => {
+      if (previousOrder === null) {
+        localStorage.removeItem(orderKey);
+      } else {
+        localStorage.setItem(orderKey, previousOrder);
+      }
+    });
+    const bounds = dragged.getBoundingClientRect();
+    const point = { clientX: Math.round(bounds.x + 18), clientY: Math.round(bounds.y + 18) };
+    const destination = { ...point, clientY: point.clientY + 40 };
+    dragged.dispatchEvent(new DragEvent("dragstart", { ...point, bubbles: true }));
+    flush();
+    // Hit the painted destination, rather than dispatching to a preselected node.
+    const target = () => document.elementFromPoint(destination.clientX, destination.clientY)!;
+    target().dispatchEvent(new DragEvent("dragover", { ...destination, bubbles: true }));
+    // Native source drag events can carry zero coordinates.
+    dragged.dispatchEvent(new DragEvent("drag", { bubbles: true }));
+    flush();
+    await vi.waitFor(() => {
+      const style = getComputedStyle(dragged);
+      expect(style.opacity).toBe("1");
+      expect(style.position).toBe("relative");
+      expect(style.zIndex).toBe("2");
+      expect(style.transform).toBe("matrix(1.08, 0, 0, 1.08, 0, 40)");
+      expect(style.transitionDuration).toBe("0s");
+      expect(dragged.checkVisibility()).toBe(true);
+      expect(selected.ariaSelected).toBe("true");
+      expect(getComputedStyle(selected).opacity).toBe("0.38");
+      expect(getComputedStyle(selected).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    });
+    if (end === "drop") {
+      target().dispatchEvent(new DragEvent("dragover", { ...destination, bubbles: true }));
+      flush();
+      await vi.waitFor(() =>
+        expect(getComputedStyle(tabs[2]).transform).toBe("matrix(1, 0, 0, 1, 0, -38)"),
+      );
+      target().dispatchEvent(new DragEvent("drop", { ...destination, bubbles: true }));
+    }
+    dragged.dispatchEvent(new DragEvent("dragend", { bubbles: true }));
+    flush();
+    await vi.waitFor(() => {
+      for (const tab of tabs) {
+        const style = getComputedStyle(tab);
+        expect(style.opacity).toBe("1");
+        expect(style.transform).toBe("matrix(1, 0, 0, 1, 0, 0)");
+        expect(style.zIndex).toBe("auto");
+      }
+    });
+    expect([...picker.querySelectorAll('[role="tab"]')].map((tab) => tab.ariaLabel)).toEqual(
+      end === "drop" ? ["Example", "Third", "Other"] : ["Example", "Other", "Third"],
+    );
+  },
+);
+
+it("opens the selected row's context menu without selecting its model", async () => {
+  const { params, update, open, picker } = mountPicker();
+  const onContextSelect = vi.fn(async () => {});
+  params.contextWindow = {
+    options: [
+      { id: "272k", label: "272K", contextWindow: 272_000 },
+      { id: "1m", label: "1M", contextWindow: 1_000_000 },
+    ],
+    selected: "272k",
+    disabled: false,
+    onSelect: onContextSelect,
+  };
+  update();
+  await open();
+  await page.getByRole("button", { name: "Context window: 272K" }).click();
+  await expect.element(page.getByRole("menuitemradio", { name: "1M", exact: true })).toBeVisible();
+  expect(params.onModelSelect).not.toHaveBeenCalled();
+  await page.getByRole("menuitemradio", { name: "1M", exact: true }).click();
+  expect(onContextSelect).toHaveBeenCalledExactlyOnceWith("1m", "main");
+  expect(params.onModelSelect).not.toHaveBeenCalled();
+  expect(picker.open).toBe(true);
+  await page.getByRole("button", { name: "Context window: 272K" }).click();
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(page.getByRole("button", { name: "Context window: 272K" }))
+    .toHaveAttribute("aria-expanded", "false");
+  expect(picker.open).toBe(true);
 });

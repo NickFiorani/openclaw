@@ -140,6 +140,7 @@ it.each([false, true])(
       modelOptions: [
         option("fixture", "lead", { recommended: true }),
         option("fixture", "rest", { disabled: restDisabled }),
+        option("other", "model"),
       ],
       selectedModelValue: "fixture/lead",
       triggerModelLabel: "lead",
@@ -160,7 +161,7 @@ it.each([false, true])(
     // Keyboard focus lands on the first selectable revealed model, else back on search.
     expect(document.activeElement).toBe(restDisabled ? control(container, "search") : rest());
 
-    group.click();
+    control(container, "provider-toggle", "other")!.click();
     flush();
     group.click();
     flush();
@@ -195,8 +196,8 @@ it("keeps Anthropic runtime choices under one provider tab", async () => {
     container.querySelector(
       '[data-chat-model-provider-group="anthropic"] .chat-controls__auth-meta-label',
     )?.textContent,
-  ).toBe("Claude Max");
-  control(container, "provider-toggle", "anthropic")!.click();
+  ).toBe("Claude Max · you@example.com");
+  expect(container.querySelectorAll("[data-chat-model-provider-toggle]")).toHaveLength(0);
   flush();
   expect(provider("anthropic/claude-sonnet-5-5")).toBe("anthropic");
 });
@@ -291,6 +292,42 @@ it("keeps search live while targets load, then ranks model, target, and account 
   expect(selectAccount).not.toHaveBeenCalled();
 });
 
+it("keeps account recovery searchable with an empty catalog", async () => {
+  const selectAccount = vi.fn();
+  const { container } = mountPicker({
+    open: true,
+    modelOptions: [],
+    modelCatalogState: { hasSnapshot: true, status: "ready" },
+    accountSection: accountSection(selectAccount),
+  });
+  await waitForMenu(container);
+  const search = container.querySelector<HTMLInputElement>(modelControlSelector("search"));
+  expect(search).not.toBeNull();
+  searchFor(search!, "needle");
+  keydown(search!, "Enter");
+  expect(selectAccount).toHaveBeenCalledWith("current", expect.any(MouseEvent));
+});
+
+it("retains setup recovery when every model has an unsupported runtime", async () => {
+  const onModelSetup = vi.fn();
+  const { container } = mountPicker({
+    open: true,
+    modelOptions: [
+      option("fixture", "unavailable", {
+        disabled: true,
+        unavailableReason: "unsupported-runtime",
+      }),
+    ],
+    modelCatalogState: { hasSnapshot: true, status: "ready" },
+    onModelSetup,
+  });
+  await waitForMenu(container);
+  const setup = control(container, "setup");
+  expect(setup).not.toBeNull();
+  setup!.click();
+  expect(onModelSetup).toHaveBeenCalledOnce();
+});
+
 it("persists keyboard rail order without moving the selected provider", async () => {
   localStorage.clear();
   const params = pickerProps({
@@ -332,12 +369,16 @@ it.each(["missing-auth", "auth-failed"] as const)(
         option("openai", "two", { disabled: true, unavailableReason }),
       ],
       selectedModelValue: "openai/one",
+      providerAuth: new Map([["openai", { kind: "missing", label: "Sign-in needed" }]]),
       modelCatalogState: { hasSnapshot: true, status: "ready" },
       onModelSetup,
       onModelSelect,
     });
     await waitForMenu(container);
     const rows = [...container.querySelectorAll<HTMLButtonElement>("[data-chat-model-option]")];
+    expect(
+      container.querySelector(".chat-controls__provider-heading .chat-controls__auth-meta"),
+    ).toBeNull();
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.disabled)).toBe(true);
     expect(rows[0]!.classList.contains("chat-controls__inline-select-option--selected")).toBe(
@@ -382,6 +423,6 @@ it("renders the Claude login command as code and omits the redundant empty restr
       },
     }),
   );
-  expect(view.container.textContent).toContain("No models are permitted by your administrator.");
+  expect(view.container.textContent).toContain("No models are permitted by your admin.");
   expect(view.container.querySelector("[data-chat-model-policy]")).toBeNull();
 });

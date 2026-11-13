@@ -53,7 +53,8 @@ describe("chat account selection", () => {
     selection: ChatAccountSelection | null,
     modelAuthStatusResult?: ModelAuthStatusResult,
   ) {
-    const container = document.createElement("div");
+    const container = document.body.appendChild(document.createElement("div"));
+    onTestFinished(() => container.remove());
     let current = true;
     const state = projectChatFields<Pick<ChatPageHost, "client" | "chatAccountSelection">>({
       client: createTestGatewayClient(request),
@@ -93,13 +94,15 @@ describe("chat account selection", () => {
       retire: () => {
         current = false;
       },
-      open: () =>
-        container.querySelector<HTMLButtonElement>("[data-chat-account-group-toggle]")?.click(),
+      open: () => {
+        container.querySelector<HTMLButtonElement>(".chat-controls__account-trigger")?.click();
+        flush();
+      },
       select: (value: string) => {
         container
           .querySelector<HTMLButtonElement>(`[data-chat-account-option="${value}"]`)
           ?.click();
-        return container.querySelector("[data-chat-account-group-toggle]")?.textContent?.trim();
+        return container.querySelector(".chat-controls__account-trigger")?.textContent?.trim();
       },
     };
   }
@@ -141,12 +144,12 @@ describe("chat account selection", () => {
     expect(request).not.toHaveBeenCalled();
     expect(
       view.container
-        .querySelector("[data-chat-account-group-toggle]")
+        .querySelector(".chat-controls__account-trigger")
         ?.getAttribute("aria-expanded"),
     ).toBe("false");
     view.open();
     await vi.waitFor(() => expect(view.container.textContent).toContain("Work workspace"));
-    expect(view.container.querySelector("[data-chat-account-group-toggle]")?.textContent).toContain(
+    expect(view.container.querySelector(".chat-controls__account-trigger")?.textContent).toContain(
       "Personal workspace",
     );
     expect(view.container.textContent).not.toContain("Claude account");
@@ -154,7 +157,7 @@ describe("chat account selection", () => {
     expect(view.onSelect).toHaveBeenCalledWith(
       expect.objectContaining({ authProfileId: "openai:work", label: "Work workspace" }),
     );
-    expect(view.container.querySelector("[data-chat-account-group-toggle]")?.textContent).toContain(
+    expect(view.container.querySelector(".chat-controls__account-trigger")?.textContent).toContain(
       "Personal workspace",
     );
     expect(request.mock.calls.map(([method]) => method)).toEqual(["users.listModelAccounts"]);
@@ -166,7 +169,7 @@ describe("chat account selection", () => {
       source: "user",
     };
     flush();
-    expect(view.container.querySelector("[data-chat-account-group-toggle]")?.textContent).toContain(
+    expect(view.container.querySelector(".chat-controls__account-trigger")?.textContent).toContain(
       "Work workspace",
     );
     view.select("manage");
@@ -209,23 +212,20 @@ describe("chat account selection", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("retries in place and shows usage only for the identified account", async () => {
-    const request = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("inventory offline"))
-      .mockResolvedValue({
-        profileId: "owner",
-        links: [],
-        accounts: [
-          {
-            provider: "openai",
-            authProfileId: "openai:work",
-            label: "Work",
-            authType: "oauth",
-            selected: false,
-          },
-        ],
-      } satisfies UsersListModelAccountsResult);
+  it("shows account names and emails without provider usage", async () => {
+    const request = vi.fn().mockResolvedValue({
+      profileId: "owner",
+      links: [],
+      accounts: [
+        {
+          provider: "openai",
+          authProfileId: "openai:work",
+          label: "Work",
+          authType: "oauth",
+          selected: false,
+        },
+      ],
+    } satisfies UsersListModelAccountsResult);
     const view = mountAccountControl(
       request,
       {
@@ -262,31 +262,28 @@ describe("chat account selection", () => {
         ],
       },
     );
-    expect(view.container.querySelector("[data-chat-account-group-toggle]")?.textContent).toContain(
-      "Personal · personal@example.com",
+    expect(view.container.querySelector(".chat-controls__account-trigger")?.textContent).toContain(
+      "Personal",
     );
     view.open();
-    await vi.waitFor(() => expect(view.container.querySelector('[role="alert"]')).not.toBeNull());
-    expect(
-      view.container.querySelector('[data-chat-account-option="current"]')?.textContent,
-    ).toContain("5h 62% left");
-    expect(view.container.querySelector("[data-low]")?.textContent).toContain("Week 9% left");
-    view.container.querySelector<HTMLButtonElement>('[role="alert"] button')!.click();
     await vi.waitFor(() =>
       expect(
         view.container.querySelector('[data-chat-account-option="account:openai:work"]'),
       ).not.toBeNull(),
     );
     expect(
-      view.container.querySelector(
-        '[data-chat-account-option="account:openai:work"] .chat-controls__account-usage',
-      ),
-    ).toBeNull();
-    expect(view.container.querySelector('[role="alert"]')).toBeNull();
-    expect(request).toHaveBeenCalledTimes(2);
+      view.container.querySelector('[data-chat-account-option="current"]')?.textContent,
+    ).toContain("personal@example.com");
+    expect(
+      view.container.querySelector('[data-chat-account-option="account:openai:work"]')?.textContent,
+    ).toContain("work@example.com");
+    expect(view.container.textContent).not.toContain("5h");
+    expect(view.container.textContent).not.toContain("Week");
+    expect(view.container.querySelector('[data-chat-account-option="automatic"]')).toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
     expect(
       view.container
-        .querySelector("[data-chat-account-group-toggle]")
+        .querySelector(".chat-controls__account-trigger")
         ?.getAttribute("aria-expanded"),
     ).toBe("true");
   });
@@ -367,13 +364,13 @@ describe("chat pane composer controls", () => {
       cached: true,
       connected: false,
       error: "metadata unavailable",
-      message: "Offline",
+      message: "Disconnected",
     },
     {
       label: "failed with a snapshot",
       cached: true,
       error: "metadata unavailable",
-      message: "Some models could not be refreshed. Open Models to try again.",
+      message: "Couldn’t refresh some models. Open Models to try again.",
     },
     {
       label: "failed without a snapshot",
@@ -398,12 +395,17 @@ describe("chat pane composer controls", () => {
           : [],
         chatModelSwitchPromises: {},
         sessionKey: "main",
+        agentsList: {
+          agents: [{ id: "main", defaultPermissionMode: "guarded" }],
+          defaultId: "main",
+          mainKey: "main",
+          scope: "per-sender",
+        },
       }) as unknown as ChatPageHost;
       state.chatModelCatalogError = error;
       const onModelSetup = vi.fn();
 
       const controls = renderControls(state, {
-        agentDefaultPermissionMode: "guarded",
         onModelSetup,
       });
       controls.composerControls.model.modelPickerOpen = true;
@@ -465,8 +467,13 @@ describe("chat pane composer controls", () => {
       entry: { sessionId: "permission-test-session" },
     } satisfies SessionPatchResult);
 
+    state.agentsList = {
+      agents: [{ id: "main", defaultPermissionMode: "guarded" }],
+      defaultId: "main",
+      mainKey: "main",
+      scope: "per-sender",
+    };
     const controls = renderControls(state, {
-      agentDefaultPermissionMode: "guarded",
       canSelectFull: false,
     });
     const view = mountSolid(
@@ -485,7 +492,7 @@ describe("chat pane composer controls", () => {
     const menu = container.querySelector<HTMLElement>('[role="menu"]')!;
     await waitForSolid(() => expect(menu.matches(":popover-open")).toBe(true));
 
-    const heading = container.querySelector<HTMLElement>(".chat-controls__permission-heading");
+    const heading = menu.querySelector<HTMLElement>(".oc-menu-heading__label");
     expect(heading?.textContent?.trim()).toBe("Permissions");
     expect(heading?.closest('[role="menuitem"]')).toBeNull();
     const docsLink = container.querySelector<HTMLElement>("a.chat-controls__permission-learn-more");
@@ -501,7 +508,7 @@ describe("chat pane composer controls", () => {
     const defaultOption = container.querySelector<HTMLElement>(
       '[data-chat-permission-option="default"]',
     );
-    expect(defaultOption?.textContent).toContain("Uses this agent's settings.");
+    expect(defaultOption?.textContent).toContain("Uses this agent’s settings.");
     expect(
       container.querySelector('[data-chat-permission-option="guarded"]')?.textContent,
     ).toContain("Default");
