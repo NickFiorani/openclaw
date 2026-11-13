@@ -8,13 +8,13 @@ import { waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { ChatModelControls } from "./chat-model-controls.tsx";
 
 it.each([
-  { alternate: false, pinned: false },
-  { alternate: true, pinned: false },
-  { alternate: false, pinned: true },
-  { alternate: true, pinned: true },
+  { alternate: false, pinned: false, all: true },
+  { alternate: true, pinned: false, all: false },
+  { alternate: false, pinned: true, all: false },
+  { alternate: true, pinned: true, all: true },
 ])(
-  "projects inert cooldown and selected-account expiry (alternate=$alternate, pinned=$pinned)",
-  async ({ alternate, pinned }) => {
+  "shows inert cooldowns without expiry or context controls (alternate=$alternate, pinned=$pinned, all=$all)",
+  async ({ alternate, pinned, all }) => {
     installModelPickerLayout();
     const now = 1_800_000_000_000;
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
@@ -24,6 +24,10 @@ it.each([
       unavailableReason: "cooldown",
       unavailableUntil: now + 720_000,
     } as const;
+    const contextWindows = [
+      { id: "400k", label: "400K", contextWindow: 400_000 },
+      { id: "1m", label: "1M", contextWindow: 1_000_000 },
+    ];
     const model: ModelCatalogEntry = {
       id: "model",
       name: "Model",
@@ -32,7 +36,11 @@ it.each([
       contextWindow: 400_000,
       agentRuntime: { id: "openclaw", source: "model" },
       ...(alternate
-        ? { runtimeChoices: [{ ...unavailable, agentRuntime: { id: "codex", source: "model" } }] }
+        ? {
+            runtimeChoices: [
+              { ...unavailable, contextWindows, agentRuntime: { id: "codex", source: "model" } },
+            ],
+          }
         : unavailable),
     };
     const sessions = createSessionsListResult({
@@ -45,7 +53,10 @@ it.each([
       id: alternate ? "codex" : "openclaw",
       source: alternate ? "session-key" : "model",
     };
+    sessions.sessions[0]!.contextWindows = contextWindows;
+    sessions.sessions[0]!.contextWindow = "400k";
     sessions.sessions[0]!.modelOverrideSource = pinned ? "user" : undefined;
+    const onSelect = vi.fn();
     const view = mountSolid(() => (
       <ChatModelControls
         activeRunId={null}
@@ -56,7 +67,17 @@ it.each([
         sending={false}
         stream={null}
         modelPickerOpen
-        modelCatalog={[model]}
+        modelCatalog={[
+          model,
+          {
+            id: "other",
+            name: "Other model",
+            provider: "example",
+            contextWindow: 400_000,
+            ...(all ? unavailable : { available: true }),
+          },
+        ]}
+        onModelSelect={onSelect}
         modelCatalogState={{ hasSnapshot: true, status: "ready" }}
         sessionKey="main"
         selectedSession={sessions.sessions[0]}
@@ -102,13 +123,23 @@ it.each([
     expect(row?.classList.contains("chat-controls__inline-select-option--selected")).toBe(false);
     expect(row?.hasAttribute("data-chat-model-highlighted")).toBe(false);
     expect(row?.querySelector(".chat-controls__inline-select-check")).toBeNull();
-    expect(row?.querySelector(".chat-controls__model-option-meta")?.textContent).toBe(
-      "Cooldown 12m",
+    expect(view.container.querySelector(".chat-controls__context-trigger")).toBeNull();
+    const header = view.container.querySelector(".chat-controls__provider-heading");
+    expect(header?.querySelectorAll(".chat-controls__model-cooldown")).toHaveLength(all ? 1 : 0);
+    expect(row?.querySelector(".chat-controls__model-option-meta")?.textContent ?? "").toBe(
+      all ? "" : "Cooldown 12m",
     );
-    expect(
-      view.container.querySelector(".chat-controls__auth-meta openclaw-tooltip"),
-    ).toHaveProperty("content", "you@example.com\nCredential expires in 3m");
-    expect(view.container.querySelector(".chat-controls__auth-meta")?.textContent).toBe("Personal");
+    expect(header?.querySelector("openclaw-tooltip")).toBeNull();
+    expect(header?.textContent).not.toMatch(/expires|3m/);
+    const other = view.container.querySelector<HTMLButtonElement>(
+      '[data-chat-model-option="example/other"]',
+    );
+    expect(other?.disabled).toBe(all);
+    expect(other?.querySelector(".chat-controls__model-option-meta")?.textContent ?? "").toBe(
+      all ? "" : "400k",
+    );
+    row?.click();
+    expect(onSelect).not.toHaveBeenCalled();
     view.unmount();
   },
 );

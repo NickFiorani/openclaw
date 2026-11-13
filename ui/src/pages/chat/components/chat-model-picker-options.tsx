@@ -21,7 +21,7 @@ import {
 } from "./chat-model-picker-options.ts";
 import { ChatModelSearchContext, type ChatModelSearchRow } from "./chat-model-picker-search.ts";
 
-function ModelCooldown(props: { until: number }) {
+export function ChatModelCooldown(props: { until: number }) {
   const search = useContext(ChatModelSearchContext);
   const label = createMemo(() => {
     const remaining =
@@ -108,9 +108,10 @@ function optionPresentation(options: ModelPresentationProps) {
   const blocked = optionBlocksSelection(options.entry);
   const coolingDown = blocked && options.entry.unavailableReason === "cooldown";
   const needsAuth = blocked && !coolingDown;
-  const cooldownUntil = coolingDown ? options.entry.unavailableUntil : undefined;
+  const cooldownUntil =
+    coolingDown && !options.hideCooldown ? options.entry.unavailableUntil : undefined;
   const context =
-    selected && (options.contextWindow?.options.length ?? 0) > 1
+    selected && !coolingDown && (options.contextWindow?.options.length ?? 0) > 1
       ? options.contextWindow
       : undefined;
   const contextOption = context?.options.find((option) => option.id === context.selected);
@@ -278,7 +279,7 @@ function ModelOptionButton(
               ]}
             >
               <Show when={props.presentation.cooldownUntil} fallback={props.presentation.modelMeta}>
-                {(until) => <ModelCooldown until={until()} />}
+                {(until) => <ChatModelCooldown until={until()} />}
               </Show>
               <Show when={props.presentation.context}>
                 <Icon name="chevronDown" />

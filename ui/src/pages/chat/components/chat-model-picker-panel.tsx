@@ -18,12 +18,14 @@ import {
 import {
   isModelPickerOptionSelected,
   modelProviderId,
+  modelCooldownDeadline,
   prepareChatModelPickerPanel,
   modelPickerOptionKey,
   type ChatModelPickerOption as ModelPickerOption,
   type ChatModelPickerTargetGroup,
 } from "./chat-model-picker-options.ts";
 import {
+  ChatModelCooldown,
   ChatModelPickerOption,
   ChatModelPickerTargetOption,
   modelOptionSearchRow,
@@ -383,7 +385,7 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
       </>
     );
   }
-  function ModelOption(props: { entry: ModelPickerOption }) {
+  function ModelOption(props: { entry: ModelPickerOption; hideCooldown?: boolean }) {
     const key = createMemo(() => modelPickerOptionKey(props.entry));
     return (
       <>
@@ -391,6 +393,7 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
           <ChatModelPickerOption
             disabled={disabled()}
             entry={props.entry}
+            hideCooldown={props.hideCooldown}
             index={state().optionIndex.get(modelPickerOptionKey(props.entry)) ?? 0}
             selectedModelValue={selectedModelValue()}
             selectedAgentRuntime={selectedAgentRuntime()}
@@ -411,7 +414,13 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
     const provider = createMemo(() => props.provider);
     const providerLabel = () => providerDisplayLabel(props.provider);
     const groupLabel = () => t("chat.modelControls.providerModels", { provider: providerLabel() });
-    const options = () => [...props.lead, ...props.more];
+    const options = createMemo(() => [...props.lead, ...props.more]);
+    const providerCooldown = createMemo(
+      () =>
+        !searchView?.filtering() &&
+        options().every((option) => option.disabled && option.unavailableReason === "cooldown"),
+    );
+    const cooldownUntil = () => (providerCooldown() ? modelCooldownDeadline(options()) : undefined);
     const auth = () => panel.params.providerAuth?.get(props.provider);
     const authKind = () => auth()?.kind;
     const showAuth = createMemo(
@@ -446,6 +455,7 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
                 </span>
               </span>
             ) : undefined}
+            <Show when={cooldownUntil()}>{(until) => <ChatModelCooldown until={until()} />}</Show>
             {panel.params.onProviderSettings ? (
               <IconButton
                 icon="settings"
@@ -465,7 +475,7 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
         ))}
         <ModelList label={groupLabel()} id={props.provider}>
           <For each={mounted(props.lead)} keyed={modelPickerOptionKey}>
-            {(entry) => <ModelOption entry={entry()} />}
+            {(entry) => <ModelOption entry={entry()} hideCooldown={providerCooldown()} />}
           </For>
         </ModelList>
         {props.more.length > 0 ? (
@@ -496,7 +506,7 @@ export function ChatModelPickerPanel(panel: ChatModelPickerPanelProps) {
             ))}
             <ModelList label={groupLabel()} id={`${props.provider}:more`} more>
               <For each={mounted(props.more)} keyed={modelPickerOptionKey}>
-                {(entry) => <ModelOption entry={entry()} />}
+                {(entry) => <ModelOption entry={entry()} hideCooldown={providerCooldown()} />}
               </For>
             </ModelList>
           </>

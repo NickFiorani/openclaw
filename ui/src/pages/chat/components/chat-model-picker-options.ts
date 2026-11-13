@@ -35,6 +35,15 @@ export type ChatModelPickerOption = {
   value: string;
 };
 
+export function modelCooldownDeadline(
+  options: readonly ChatModelPickerOption[],
+): number | undefined {
+  return options.reduce<number | undefined>((soonest, option) => {
+    const until = option.unavailableUntil;
+    return until === undefined ? soonest : Math.min(soonest ?? until, until);
+  }, undefined);
+}
+
 export function modelPickerOptionKey(option: ChatModelPickerOption): string {
   return JSON.stringify([option.value, option.agentRuntime ?? null]);
 }
@@ -100,6 +109,7 @@ export function formatModelLabel(
 
 export type ChatModelPickerOptionProps = {
   contextWindow?: ChatContextWindowControlParams;
+  hideCooldown?: boolean;
   sessionKey?: string;
   disabled: boolean;
   entry: ChatModelPickerOption;
