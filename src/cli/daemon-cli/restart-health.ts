@@ -99,7 +99,6 @@ type GatewayRestartWaitOptions = {
   expectedVersion?: string | null;
   expectedBuildId?: string | null;
   requireRunningService?: boolean;
-  requirePluginHealth?: boolean;
   requireChannelHealth?: boolean;
   allowUnattributedDiagnosticProbe?: boolean;
   /** Diagnostics can report absence immediately; start/restart callers wait for installation. */
@@ -207,7 +206,6 @@ export async function waitForGatewayHealthyRestart(
       snapshot.versionMismatch ||
       snapshot.buildIdMismatch ||
       (params.requireChannelHealth !== false && snapshot.channelProbeErrors?.length) ||
-      (params.requirePluginHealth !== false && snapshot.activatedPluginErrors?.length) ||
       snapshot.staleGatewayPids.length > 0
     ) {
       return "timeout";
@@ -266,7 +264,6 @@ export async function waitForGatewayHealthyRestart(
         env: params.env,
         expectedVersion: params.expectedVersion,
         expectedBuildId: params.expectedBuildId,
-        requirePluginHealth: params.requirePluginHealth,
         requireChannelHealth: params.requireChannelHealth,
         allowUnattributedDiagnosticProbe: params.allowUnattributedDiagnosticProbe,
         probeContext,
@@ -326,9 +323,6 @@ export async function waitForGatewayHealthyRestart(
         return withWaitContext(snapshot, "healthy", elapsedMs);
       }
       snapshot.healthy = false;
-      if (params.requirePluginHealth !== false && snapshot.activatedPluginErrors?.length) {
-        return withWaitContext(snapshot, "plugin-errors", elapsedMs);
-      }
       if (params.requireChannelHealth !== false && snapshot.channelProbeErrors?.length) {
         return withWaitContext(snapshot, "channel-errors", elapsedMs);
       }

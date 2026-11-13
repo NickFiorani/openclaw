@@ -88,7 +88,6 @@ export async function waitForGatewayDiagnosticReadiness(opts: {
           deadlineOutcome: "snapshot",
           probeContext,
           probeHosts: LOOPBACK_PORT_PROBE_HOSTS,
-          requirePluginHealth: false,
           allowUnattributedDiagnosticProbe: true,
           waitForMissingService: false,
           onProgress: opts.onProgress,

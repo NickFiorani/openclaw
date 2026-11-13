@@ -676,9 +676,6 @@ export async function runDaemonRestart(opts: DaemonLifecycleOptions = {}): Promi
           env: restartContext.env,
           config: restartContext.config,
           probeHosts: await resolveGatewayServiceProbeHosts(restartContext),
-          ...(restartContext.env.OPENCLAW_UPDATE_IN_PROGRESS !== "1"
-            ? { requirePluginHealth: false }
-            : {}),
           supervisorKeepsAlive: process.platform === "darwin",
           signal: getAsyncWorkSignal(),
         });

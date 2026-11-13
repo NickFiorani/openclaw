@@ -83,7 +83,6 @@ export class GatewayUpdateSuccessor {
             child,
             probeHosts: [params.host ?? "127.0.0.1"],
             requireRunningService: true,
-            requirePluginHealth: false,
           })
         : undefined;
     if (

@@ -30,7 +30,6 @@ export async function inspectGatewayRestart(params: {
   expectedVersion?: string | null;
   expectedBuildId?: string | null;
   openStateSchemaReadAdmission?: OpenClawStateSchemaReadAdmission;
-  requirePluginHealth?: boolean;
   requireChannelHealth?: boolean;
   /** Diagnostic-only; protocol reachability never establishes process ownership. */
   allowUnattributedDiagnosticProbe?: boolean;
@@ -78,10 +77,6 @@ export async function inspectGatewayRestart(params: {
     }));
   const expectedVersion = normalizeOptionalString(params.expectedVersion);
   const expectedBuildId = normalizeOptionalString(params.expectedBuildId);
-  const requiresGatewayProbe =
-    Boolean(expectedVersion || expectedBuildId) ||
-    params.requirePluginHealth === false ||
-    params.requireChannelHealth === false;
   let reachability: GatewayReachability | null = null;
   const loadReachability = () =>
     read("gateway-health", () =>
@@ -91,10 +86,7 @@ export async function inspectGatewayRestart(params: {
         ...params.probeContext,
         ...(params.configuredProbe ? { configuredProbe: params.configuredProbe } : {}),
         env,
-        allowHttpVerification:
-          Boolean(expectedVersion) &&
-          params.requirePluginHealth === false &&
-          params.requireChannelHealth === false,
+        allowHttpVerification: Boolean(expectedVersion) && params.requireChannelHealth === false,
         timeoutMs: remainingTimeoutMs(params.probeTimeoutMs),
         ...(signal ? { signal } : {}),
       }),
@@ -152,7 +144,7 @@ export async function inspectGatewayRestart(params: {
         )
       : undefined;
   if (startupPhase && (expectedVersion || expectedBuildId)) {
-    // Startup cannot conceal a previous install or a definitive plugin/channel failure.
+    // Startup cannot conceal a previous install or a definitive channel failure.
     reachability = await loadReachability();
   }
   const gatewayListeners =
@@ -173,7 +165,6 @@ export async function inspectGatewayRestart(params: {
     params.allowUnattributedDiagnosticProbe === true &&
     process.platform === "win32" &&
     running &&
-    params.requirePluginHealth === false &&
     runtimePid == null &&
     portUsage.listeners.length > 0 &&
     portUsage.listeners.every(
@@ -183,7 +174,7 @@ export async function inspectGatewayRestart(params: {
   if (
     !startupPhase &&
     portUsage.status === "busy" &&
-    (!running || !requiresGatewayProbe || ownsPort || canProbeUnattributedListener)
+    (!running || ownsPort || canProbeUnattributedListener)
   ) {
     const reachable = (reachability ??= await loadReachability());
     // Auth rejection proves liveness, but only a successful hello supplies a version.
@@ -278,10 +269,8 @@ export async function inspectGatewayRestart(params: {
       }
     }
   }
-  if (
-    (params.requirePluginHealth !== false && snapshot.activatedPluginErrors?.length) ||
-    (params.requireChannelHealth !== false && snapshot.channelProbeErrors?.length)
-  ) {
+  // Plugin load errors are notices: the plugin stays unloaded and the Gateway serves.
+  if (params.requireChannelHealth !== false && snapshot.channelProbeErrors?.length) {
     snapshot.healthy = false;
   }
   return snapshot;

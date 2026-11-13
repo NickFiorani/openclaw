@@ -92,7 +92,6 @@ describe("read-only Windows diagnostics with unavailable process metadata", () =
         requestHttp: async () => null,
         resolveWebSocketTarget: async () => null,
       },
-      requirePluginHealth: false,
       allowUnattributedDiagnosticProbe: scenario.flag === false ? undefined : true,
     });
     expect(snapshot).toMatchObject({

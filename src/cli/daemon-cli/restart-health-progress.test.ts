@@ -104,7 +104,6 @@ describe("restart startup progress", () => {
       const result = await waitForGatewayHealthyRestart({
         service,
         port: 18789,
-        requirePluginHealth: false,
         timeoutMs,
         onProgress,
       });
@@ -136,7 +135,6 @@ describe("restart startup progress", () => {
       const result = await waitForGatewayHealthyRestart({
         service: makeGatewayService({ status: "running", pid: 8000 }),
         port: 18789,
-        requirePluginHealth: false,
       });
       expect(result).toMatchObject({ healthy: true, waitOutcome: "healthy", elapsedMs: 0 });
     },
@@ -173,7 +171,6 @@ describe("restart startup progress", () => {
         port: 18789,
         timeoutMs: 2_000,
         requireRunningService: true,
-        requirePluginHealth: false,
         expectedBuildId,
       });
       expect(result).toMatchObject({ healthy: false, waitOutcome: outcome });
@@ -206,7 +203,6 @@ describe("restart startup progress", () => {
       child,
       port: 18789,
       requireRunningService: true,
-      requirePluginHealth: false,
       expectedVersion: "2026.9.4",
     });
     if (exitCode === null) {
@@ -240,7 +236,6 @@ describe("restart startup progress", () => {
     const health = await waitForGatewayHealthyRestart({
       service,
       port: 18789,
-      requirePluginHealth: false,
     });
     expect(health).toMatchObject({ healthy: true, waitOutcome: "healthy", elapsedMs: 180_000 });
   });
@@ -366,7 +361,6 @@ describe("restart startup progress", () => {
         service,
         port: 18789,
         isStartupMigrationActive,
-        requirePluginHealth: false,
         env: updateInProgress ? { OPENCLAW_UPDATE_IN_PROGRESS: "1" } : {},
       });
       expect(health).toMatchObject({
@@ -403,7 +397,6 @@ describe("restart startup progress", () => {
       const health = await waitForGatewayHealthyRestart({
         service: makeGatewayService({ status: "running", pid: 8000 }),
         port: 18789,
-        requirePluginHealth: false,
       });
       expect(health).toMatchObject({
         healthy: false,

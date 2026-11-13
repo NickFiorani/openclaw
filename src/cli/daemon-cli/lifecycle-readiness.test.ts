@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveGatewayStartupTiming } from "../../commands/gateway-startup-timing.js";
 import { defaultRuntime } from "../../runtime.js";
 import { mockProcessPlatform } from "../../test-utils/vitest-spies.js";
-import { requireMockCallArg, type RestartParams } from "./lifecycle.test-helpers.js";
+import type { RestartParams } from "./lifecycle.test-helpers.js";
 import { createDaemonActionContext } from "./response.js";
 import { formatGatewayRestartFailure } from "./restart-health-diagnostics.js";
 import { DEFAULT_RESTART_HEALTH_DELAY_MS } from "./restart-health.constants.js";
@@ -118,7 +118,7 @@ describe("Gateway service readiness", () => {
     { preserveDefinition: false, updateMarker: undefined },
     { preserveDefinition: true, updateMarker: "1" },
   ])(
-    "checks the activated port and required health (preserve=$preserveDefinition, update=$updateMarker)",
+    "checks the activated port (preserve=$preserveDefinition, update=$updateMarker)",
     async ({ preserveDefinition, updateMarker }) => {
       vi.stubEnv("OPENCLAW_UPDATE_IN_PROGRESS", updateMarker);
       readCliConfig.mockResolvedValue({ gateway: { port: 19001 } });
@@ -137,10 +137,6 @@ describe("Gateway service readiness", () => {
       expect(waitForGatewayHealthyRestart).toHaveBeenCalledWith(
         expect.objectContaining({ port: preserveDefinition ? 18789 : 19001 }),
       );
-      expect(
-        requireMockCallArg(waitForGatewayHealthyRestart, "waitForGatewayHealthyRestart")
-          .requirePluginHealth,
-      ).toBe(updateMarker ? undefined : false);
     },
   );
 
@@ -148,11 +144,6 @@ describe("Gateway service readiness", () => {
     { outcome: "still-starting", code: 2, message: /still starting.*openclaw gateway status/ },
     { outcome: "stopped-free", runtime: "stopped", code: 1 },
     { outcome: "timeout", code: 1, message: "Gateway start timed out after 45s" },
-    {
-      outcome: "plugin-errors",
-      code: 1,
-      message: "Gateway start failed: activated plugins reported load errors.",
-    },
     { outcome: "auth-rejected", code: 1, message: "Gateway start failed: the Gateway rejected" },
   ])("reports managed start $outcome with exit $code", async (testCase) => {
     const { outcome, runtime = "running", code, message } = testCase;
@@ -201,7 +192,6 @@ describe("Gateway service readiness", () => {
   it.each([
     { outcome: "stopped-free", reason: /service stayed stopped/, json: true, code: 1 },
     { outcome: "channel-errors", reason: /channel health checks failed/, json: true, code: 1 },
-    { outcome: "plugin-errors", reason: /plugins reported load errors/, json: true, code: 1 },
     { json: true, code: 2 },
     { json: false, code: 2 },
     { json: true, updateMarker: "1", code: 1 },
